@@ -1,25 +1,9 @@
 import os
 import sys
-import json
-import time
-import shutil
 import logging
 import requests
-import hashlib
-import zipfile
-import tempfile
 from datetime import datetime
-from functools import lru_cache
-from concurrent.futures import ThreadPoolExecutor
 
-import cv2
-import numpy as np
-import torch
-import onnxruntime as ort
-from dotenv import load_dotenv
-
-from facenet_pytorch import InceptionResnetV1
-from retinaface import RetinaFace
 
 from PyQt5.QtCore import (
     Qt, QDir, QMimeData, QUrl, QThread, QThreadPool, QRunnable,
@@ -37,389 +21,17 @@ from PyQt5.QtWidgets import (
     QProgressDialog
 )
 
-from watcher import start_watcher, stop_watcher
-from admin_setup_dialogs import AdminSetupDialog
-from admin_login import AdminLoginDialog
-from admin_setting import AdminSettingsDialog
-from config_manager import ConfigManager
-from features import DragDropListWidget
-from image_preview_dialog import ImagePreviewDialog
-from face_search_dialog import FaceSearchDialog
-
-
-# Ambil dari environment
-load_dotenv()
-API_BASE = os.getenv("BASE_URL")
-
-# Global variables
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-resnet = InceptionResnetV1(pretrained='vggface2').eval().to(device)  # Move to GPU
+from core.watcher import start_watcher, stop_watcher
+from ui.admin_login import AdminLoginDialog
+from ui.admin_setting import AdminSettingsDialog
+from utils.features import DragDropListWidget
+from ui.image_preview_dialog import ImagePreviewDialog
+from ui.face_search_dialog import FaceSearchDialog
+from core.download_worker import DownloadWorker
+from utils.image_processing import get_shared_detector
+from core.device_setup import resnet, device, API_BASE
 logger = logging.getLogger(__name__)
 
-# Print GPU info saat startup
-if torch.cuda.is_available():
-    gpu_name = torch.cuda.get_device_name(0)
-    logger.info(f"🚀 GPU detected: {gpu_name}")
-    logger.info(f"💾 GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f}GB")
-else:
-    logger.info("💻 Using CPU processing")
-
-# Shared detector instance untuk reuse
-_detector_instance = None
-
-def convert_to_json_serializable(obj):
-    """Convert numpy types to Python native types for JSON serialization"""
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, (np.float32, np.float64)):
-        return float(obj)
-    elif isinstance(obj, (np.int32, np.int64)):
-        return int(obj)
-    elif isinstance(obj, dict):
-        return {key: convert_to_json_serializable(value) for key, value in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_to_json_serializable(item) for item in obj]
-    else:
-        return obj
-
-class OptimizedRetinaFaceDetector:
-    """Optimized RetinaFace detector dengan speed improvements"""
-    
-    def __init__(self, device='cpu', conf_threshold=0.6, nms_threshold=0.4, max_size=640):
-        self.device = device
-        self.conf_threshold = conf_threshold
-        self.nms_threshold = nms_threshold
-        self.max_size = max_size
-        self.model_warmed = False
-        self._warm_up_model()
-    
-    def _warm_up_model(self):
-        """Warm up model dengan dummy detection"""
-        try:
-            dummy_img = np.ones((224, 224, 3), dtype=np.uint8) * 128
-            RetinaFace.detect_faces(dummy_img, threshold=0.9)
-            self.model_warmed = True
-            logger.info("✅ RetinaFace model warmed up")
-        except Exception as e:
-            logger.warning(f"⚠️ Model warm up failed: {e}")
-    
-    def detect_with_resize(self, img):
-        """Detect dengan image resizing dan FIXED coordinate scaling"""
-        original_h, original_w = img.shape[:2]
-        
-        # Resize jika terlalu besar
-        if max(original_w, original_h) > self.max_size:
-            scale = self.max_size / max(original_w, original_h)
-            new_w = int(original_w * scale)
-            new_h = int(original_h * scale)
-            
-            logger.info(f"🔄 Resizing: {original_w}x{original_h} -> {new_w}x{new_h} (scale={scale:.3f})")
-            
-            resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-            
-            faces_dict = RetinaFace.detect_faces(
-                resized_img, 
-                threshold=self.conf_threshold,
-                model=None,
-                allow_upscaling=False
-            )
-            
-            # FIXED: Scale coordinates back properly
-            if faces_dict:
-                for face_key, face_data in faces_dict.items():
-                    facial_area = face_data['facial_area']  # [x1, y1, x2, y2]
-                    
-                    # Scale back ke original size
-                    x1, y1, x2, y2 = facial_area
-                    original_x1 = int(x1 / scale)
-                    original_y1 = int(y1 / scale) 
-                    original_x2 = int(x2 / scale)
-                    original_y2 = int(y2 / scale)
-                    
-                    # Update dengan koordinat original
-                    face_data['facial_area'] = [original_x1, original_y1, original_x2, original_y2]
-                    
-                    logger.debug(f"Scaled bbox: ({x1},{y1},{x2},{y2}) -> ({original_x1},{original_y1},{original_x2},{original_y2})")
-        else:
-            faces_dict = RetinaFace.detect_faces(
-                img, 
-                threshold=self.conf_threshold,
-                model=None,
-                allow_upscaling=False
-            )
-        
-        return faces_dict
-    
-    def detect(self, img):
-        """Main detection method dengan FIXED bbox conversion"""
-        try:
-            start_time = time.time()
-            faces_dict = self.detect_with_resize(img)
-            detection_time = time.time() - start_time
-            
-            logger.info(f"🔍 Detection time: {detection_time:.3f}s")
-            
-            if not faces_dict:
-                return False, None
-            
-            faces_list = []
-            img_h, img_w = img.shape[:2]
-            
-            for face_key, face_data in faces_dict.items():
-                facial_area = face_data['facial_area']  # [x1, y1, x2, y2]
-                confidence = float(face_data['score'])
-                
-                # FIXED: Proper conversion dari [x1,y1,x2,y2] ke [x,y,w,h]
-                x1, y1, x2, y2 = facial_area
-                x = int(x1)
-                y = int(y1)
-                w = int(x2 - x1)  # ✅ width = x2 - x1
-                h = int(y2 - y1)  # ✅ height = y2 - y1
-                
-                # Validasi bbox
-                if w <= 0 or h <= 0:
-                    logger.warning(f"⚠️ Invalid bbox: x1={x1}, y1={y1}, x2={x2}, y2={y2}")
-                    continue
-                
-                # Pastikan bbox dalam bounds image
-                x = max(0, min(x, img_w - 1))
-                y = max(0, min(y, img_h - 1))
-                w = max(1, min(w, img_w - x))
-                h = max(1, min(h, img_h - y))
-                
-                face_array = [x, y, w, h, confidence]
-                faces_list.append(face_array)
-                
-                logger.debug(f"Face bbox: x={x}, y={y}, w={w}, h={h}, conf={confidence:.3f}")
-            
-            return True, faces_list
-            
-        except Exception as e:
-            logger.error(f"❌ Error dalam deteksi: {e}")
-            return False, None
-
-def get_shared_detector():
-    """Get shared detector instance dengan GPU optimization"""
-    global _detector_instance
-    if _detector_instance is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        _detector_instance = OptimizedRetinaFaceDetector(
-            device=device,
-            conf_threshold=0.6,
-            nms_threshold=0.4,
-            max_size=640  # Bisa naik ke 1024 jika pakai GPU untuk akurasi lebih tinggi
-        )
-        
-        # Log GPU usage
-        if device == 'cuda':
-            logger.info(f"🚀 Face detector using GPU: {torch.cuda.get_device_name(0)}")
-        else:
-            logger.info("💻 Face detector using CPU")
-            
-    return _detector_instance
-
-def create_face_detector():
-    """Factory function dengan shared instance"""
-    return get_shared_detector()
-
-def process_faces_in_image(file_path, original_shape=None, pad=None, scale=None):
-    """Optimized face processing dengan error handling yang lebih baik"""
-    try:
-        img = cv2.imread(file_path)
-        if img is None:
-            logger.warning(f"❌ Gagal membaca gambar: {file_path}")
-            return []
-
-        h, w = img.shape[:2]
-        logger.info(f"📸 Processing image: {w}x{h}")
-
-        # Gunakan shared detector
-        face_detector = get_shared_detector()
-        success, faces = face_detector.detect(img)
-
-        if not success or faces is None or len(faces) == 0:
-            logger.warning("❌ Tidak ada wajah terdeteksi.")
-            return []
-
-        logger.info(f"✅ {len(faces)} wajah terdeteksi dengan RetinaFace.")
-
-        embeddings = []
-        for i, face in enumerate(faces):
-            try:
-                x, y, w_box, h_box = map(int, face[:4])
-                confidence = float(face[4])
-                
-                # Validasi koordinat
-                x1, y1 = max(x, 0), max(y, 0)
-                x2, y2 = min(x + w_box, w), min(y + h_box, h)
-                
-                if x2 <= x1 or y2 <= y1:
-                    logger.warning(f"⚠️ Invalid bbox untuk wajah {i}")
-                    continue
-                    
-                face_crop = img[y1:y2, x1:x2]
-                if face_crop.size == 0:
-                    continue
-
-                # Optimized preprocessing
-                face_crop_resized = cv2.resize(face_crop, (160, 160), interpolation=cv2.INTER_LINEAR)
-                face_rgb = cv2.cvtColor(face_crop_resized, cv2.COLOR_BGR2RGB)
-                
-                # Tensor conversion optimization dengan GPU support
-                face_tensor = torch.from_numpy(face_rgb).permute(2, 0, 1).float()
-                face_tensor = (face_tensor / 255.0 - 0.5) / 0.5
-                face_tensor = face_tensor.unsqueeze(0).to(device)  # Move to GPU
-
-                with torch.no_grad():
-                    embedding_tensor = resnet(face_tensor).squeeze()
-                    embedding = embedding_tensor.cpu().numpy().tolist()  # Move back to CPU for JSON
-
-                # Bbox calculation
-                if original_shape and pad and scale:
-                    bbox_dict = {"x": int(x), "y": int(y), "w": int(w_box), "h": int(h_box)}
-                    original_bbox = reverse_letterbox(
-                        bbox=bbox_dict,
-                        original_shape=original_shape,
-                        resized_shape=img.shape[:2],
-                        pad=pad,
-                        scale=scale
-                    )
-                    original_bbox = convert_to_json_serializable(original_bbox)
-                else:
-                    original_bbox = {"x": int(x), "y": int(y), "w": int(w_box), "h": int(h_box)}
-
-                embeddings.append({
-                    "embedding": embedding,
-                    "bbox": original_bbox,
-                    "confidence": confidence
-                })
-
-            except Exception as e:
-                logger.warning(f"⚠️ Error processing face {i}: {e}")
-                continue
-
-        return embeddings
-        
-    except Exception as e:
-        logger.error(f"❌ Error processing image {file_path}: {e}")
-        return []
-
-
-class DownloadWorker(QThread):
-    """Worker thread for downloading files"""
-    progress = pyqtSignal(int, str)  # progress, status
-    finished = pyqtSignal(bool, str)  # success, message
-    
-    def __init__(self, items, save_path):
-        super().__init__()
-        self.items = items
-        self.save_path = save_path
-        self.cancelled = False
-    
-    def run(self):
-        try:
-            if len(self.items) == 1:
-                self.download_single_file()
-            else:
-                self.download_multiple_files_as_zip()
-            
-            if not self.cancelled:
-                self.finished.emit(True, f"Downloaded {len(self.items)} file(s) successfully!")
-            
-        except Exception as e:
-            self.finished.emit(False, f"Download failed: {str(e)}")
-    
-    def cancel(self):
-        """Cancel the download operation"""
-        self.cancelled = True
-    
-    def download_single_file(self):
-        """Download single file"""
-        item = self.items[0]
-        url_or_path = item.data(Qt.UserRole + 2)
-        
-        self.progress.emit(50, "Downloading file...")
-        
-        if url_or_path.startswith(('http://', 'https://')):
-            response = requests.get(url_or_path, stream=True, timeout=30)
-            response.raise_for_status()
-            
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded = 0
-            
-            with open(self.save_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if self.cancelled:
-                        return
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    
-                    if total_size > 0:
-                        progress = int((downloaded / total_size) * 100)
-                        self.progress.emit(progress, f"Downloading... {downloaded}/{total_size} bytes")
-        else:
-            # Local file
-            import shutil
-            shutil.copy2(url_or_path, self.save_path)
-            self.progress.emit(100, "File copied successfully")
-    
-    def download_multiple_files_as_zip(self):
-        """Download multiple files and create ZIP"""
-        with zipfile.ZipFile(self.save_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for i, item in enumerate(self.items):
-                if self.cancelled:
-                    return
-                    
-                progress_percent = int((i / len(self.items)) * 100)
-                self.progress.emit(progress_percent, f"Processing {i+1}/{len(self.items)}")
-                
-                filename = item.data(Qt.UserRole)
-                url_or_path = item.data(Qt.UserRole + 2)
-                outlet_name = item.data(Qt.UserRole + 4)
-                
-                # Create folder structure in zip: outlet/filename
-                if outlet_name and outlet_name != 'Unknown':
-                    zip_path = f"{outlet_name}/{filename}"
-                else:
-                    zip_path = filename
-                
-                # Handle duplicate filenames
-                counter = 1
-                original_zip_path = zip_path
-                while zip_path in [info.filename for info in zipf.infolist()]:
-                    name, ext = os.path.splitext(original_zip_path)
-                    zip_path = f"{name}_{counter}{ext}"
-                    counter += 1
-                
-                try:
-                    if url_or_path.startswith(('http://', 'https://')):
-                        # Download from URL
-                        response = requests.get(url_or_path, timeout=30)
-                        response.raise_for_status()
-                        zipf.writestr(zip_path, response.content)
-                    else:
-                        # Local file
-                        if os.path.exists(url_or_path):
-                            zipf.write(url_or_path, zip_path)
-                        else:
-                            logger.warning(f"File not found: {url_or_path}")
-                            
-                except Exception as e:
-                    logger.warning(f"Failed to add {filename} to ZIP: {e}")
-                    continue
-            
-            # # Add search info file
-            # search_info = "Face Search Results\n"
-            # search_info += "=" * 30 + "\n\n"
-            # for item in self.items:
-            #     filename = item.data(Qt.UserRole)
-            #     similarity = item.data(Qt.UserRole + 3)
-            #     outlet = item.data(Qt.UserRole + 4)
-            #     search_info += f"File: {filename}\n"
-            #     search_info += f"Outlet: {outlet}\n"
-            #     search_info += f"Similarity: {similarity*100:.1f}%\n\n"
-            
-            # zipf.writestr("search_info.txt", search_info)
 
 
 class WatcherThread(QThread):
@@ -1018,10 +630,10 @@ class ExplorerWindow(QMainWindow):
                 "All Files (*)"
             )
         else:
-            # Multiple files - create zip
-            save_path, _ = QFileDialog.getSaveFileName(
-                self, "Save Files as ZIP", "face_search_results.zip", 
-                "ZIP files (*.zip)"
+            # Multiple files - choose folder (no ZIP)
+            save_path = QFileDialog.getExistingDirectory(
+                self, "Select Download Folder", 
+                os.path.expanduser("~/Downloads")
             )
         
         if not save_path:
@@ -1060,7 +672,7 @@ class ExplorerWindow(QMainWindow):
             self.download_worker.cancel()
             self.download_worker.terminate()
             self.download_worker.wait(3000)  # Wait max 3 seconds
-            # self.log_with_timestamp("❌ Download cancelled by user")
+            
 
     def download_finished(self, success, message):
         """Handle download completion"""

@@ -1,17 +1,16 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QWidget, QGraphicsDropShadowEffect, QProgressBar, QListWidget,
-    QListWidgetItem, QSplitter, QFrame
+    QWidget, QProgressBar, QListWidget,
+    QListWidgetItem, QSplitter
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QPropertyAnimation, QEasingCurve
-from PyQt5.QtGui import QPixmap, QImage, QPainter, QColor, QFont, QIcon
+from PyQt5.QtGui import QPixmap, QImage, QIcon
 import cv2
 import numpy as np
 import torch
 import json
 import requests
 import os
-from datetime import datetime
 
 class FaceDetectionThread(QThread):
     """Thread for face detection and embedding"""

@@ -2,8 +2,8 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout, 
     QSizePolicy, QGraphicsDropShadowEffect, QWidget
 )
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect, pyqtSignal
-from PyQt5.QtGui import QPixmap, QPainter, QColor, QLinearGradient
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve
+from PyQt5.QtGui import QPixmap, QColor
 
 class ImagePreviewDialog(QDialog):
     """Beautiful image preview dialog with smooth animations"""
