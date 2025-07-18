@@ -23,24 +23,8 @@ class MainApplication:
     def run(self):
         """Run the application with authentication flow"""
         
-        # Check if app is configured
-        if not self.config_manager.is_configured():
-            # First time setup
-            setup_dialog = AdminSetupDialog(self.config_manager)
-            if setup_dialog.exec_() != QDialog.Accepted:
-                QMessageBox.information(None, "Info", "Setup dibatalkan. Aplikasi akan keluar.")
-                return 0
-        
-        # Check if admin authentication is required
-        if self.config_manager.config.get("require_admin", True):
-            # Show login dialog
-            login_dialog = AdminLoginDialog(self.config_manager)
-            if login_dialog.exec_() != QDialog.Accepted:
-                QMessageBox.information(None, "Info", "Login diperlukan untuk menggunakan aplikasi.")
-                return 0
-        
         # Launch main application
-        self.main_window = ExplorerWindow(self.config_manager)
+        self.main_window = ExplorerWindow()
         self.main_window.show()
         
         return self.app.exec_()

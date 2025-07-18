@@ -494,7 +494,7 @@ class FaceSearchDialog(QDialog):
         
         # Perform search in thread
         QTimer.singleShot(100, self._do_search)
-        
+            
     def _do_search(self):
         """Actual search implementation"""
         try:
@@ -506,7 +506,7 @@ class FaceSearchDialog(QDialog):
             request_data = {
                 "embedding": self.current_embedding,
                 "radius": 0.7,  # Similarity threshold
-                "top_k": 50,    # Max results
+                "top_k": 100,    # Max results
                 "collection_name": "face_embeddings"
             }
             
@@ -572,68 +572,74 @@ class FaceSearchDialog(QDialog):
             self.search_btn.setEnabled(True)
             
     def display_results(self, results):
-        """Display search results"""
+        """Display search results - PRESERVE FILENAME"""
         if not results:
             self.status_label.setText("❌ No matching faces found")
             return
             
         self.status_label.setText(f"✅ Found {len(results)} matching images")
         
-        # Format results for explorer window
+        # Format results untuk explorer window - PRESERVE ALL FIELDS
         formatted_results = []
         
         for result in results:
-            # Create custom list item
-            item = QListWidgetItem()
-            
-            # Extract data - handle different response formats
-            file_path = result.get('file_path', '')
+            # Extract semua field
+            file_path = result.get('original_path', '') or result.get('file_path', '')
             similarity = result.get('similarity', 0)
             photo_id = result.get('photo_id', '')
             outlet_name = result.get('outlet_name', 'Unknown') 
             thumbnail_path = result.get('thumbnail_path', '')
             original_path = result.get('original_path', '')
             
-            # Debug: Print raw data
-            print(f"Raw result data: file_path={original_path}, similarity={similarity}, outlet={outlet_name}")
+            # CRITICAL: Preserve filename dari backend
+            filename = result.get('filename', '')
             
-            # Skip if no file path
+            print(f"🔍 Backend result: filename='{filename}', photo_id={photo_id}")
+            
+            # Fallback filename extraction jika kosong
+            if not filename:
+                if original_path:
+                    if original_path.startswith(('http://', 'https://')):
+                        filename = original_path.split('/')[-1].split('?')[0]
+                    else:
+                        filename = os.path.basename(original_path)
+                elif file_path:
+                    filename = os.path.basename(file_path)
+                else:
+                    filename = f"{photo_id}.jpg"
+            
+            # Skip jika tidak ada data berguna
             if not file_path:
                 continue
             
-            # Ensure similarity is between 0 and 1
-            similarity = max(0, min(1, similarity))
+            # Create list item untuk dialog (YANG INI OPSIONAL - untuk display di dialog)
+            item = QListWidgetItem()
             
-            filename = os.path.basename(file_path)
+            similarity = max(0, min(1, similarity))
+            display_filename = os.path.basename(filename) if filename else 'Unknown'
             similarity_percent = similarity * 100
-            item.setText(f"📷 {filename}\n   Similarity: {similarity_percent:.1f}%")
+            item.setText(f"📷 {display_filename}\n   Similarity: {similarity_percent:.1f}%")
             item.setData(Qt.UserRole, file_path)
             item.setData(Qt.UserRole + 1, photo_id)
             
-            # Add icon if possible
-            if os.path.exists(file_path):
-                pixmap = QPixmap(file_path)
-                if not pixmap.isNull():
-                    icon = QIcon(pixmap.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    item.setIcon(icon)
-                    
             self.results_list.addItem(item)
             
-            # IMPORTANT: Add to formatted results with correct similarity
+            # IMPORTANT: Preserve SEMUA field termasuk filename untuk ExplorerWindow
             formatted_results.append({
                 "file_path": file_path,
-                "similarity": similarity,  # Make sure this is included!
+                "filename": filename,  # ← CRITICAL: Include filename!
+                "similarity": similarity,
                 "photo_id": photo_id,
                 "outlet_name": outlet_name,
                 "thumbnail_path": thumbnail_path,
                 "original_path": original_path
             })
         
-        # Debug: Print what we're sending
-        print(f"Sending {len(formatted_results)} results to explorer")
-        for r in formatted_results[:3]:  # Print first 3
-            print(f"  - {r['file_path']} (similarity: {r.get('similarity', 0):.3f})")
-            
-        # Emit formatted results
+        # Debug: Print apa yang akan dikirim ke ExplorerWindow
+        print(f"📤 Sending to Explorer: {len(formatted_results)} results")
+        for i, r in enumerate(formatted_results[:3]):  # Print first 3
+            print(f"  Result {i}: filename='{r['filename']}', similarity={r.get('similarity', 0):.3f}")
+        
+        # Emit ke ExplorerWindow dengan filename yang sudah preserved
         if formatted_results:
             self.search_completed.emit(formatted_results)

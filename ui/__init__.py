@@ -4,4 +4,5 @@ from .admin_setting import AdminSettingsDialog
 from .explorer_window import ExplorerWindow
 from .face_search_dialog import FaceSearchDialog
 from .image_preview_dialog import ImagePreviewDialog
-
+from .enhanced_image_preview_dialog import EnhancedImagePreviewDialog
+from .navigation_preview import NavigationPreviewDialog
