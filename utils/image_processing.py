@@ -30,7 +30,7 @@ def get_shared_detector():
     """Get shared detector instance dengan GPU optimization"""
     global _detector_instance
     if _detector_instance is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device = 'cpu' 
         _detector_instance = OptimizedRetinaFaceDetector(
             device=device,
             conf_threshold=0.6,
@@ -39,10 +39,7 @@ def get_shared_detector():
         )
         
         # Log GPU usage
-        if device == 'cuda':
-            logger.info(f"🚀 Face detector using GPU: {torch.cuda.get_device_name(0)}")
-        else:
-            logger.info("💻 Face detector using CPU")
+        
             
     return _detector_instance
 
