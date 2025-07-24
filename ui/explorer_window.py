@@ -20,8 +20,8 @@ from utils.features import DragDropListWidget
 from ui.face_search_dialog import FaceSearchDialog
 from ui.navigation_preview import NavigationPreviewDialog
 from utils.image_processing import get_shared_detector
-from core.device_setup import resnet, device, API_BASE
-# ✅ REMOVE THIS: from config.thumbnail_manager import OptimizedSearchResultsWidget
+from core.device_setup import FaceEncoder
+
 
 logger = logging.getLogger(__name__)
 
@@ -212,36 +212,49 @@ class OptimizedSearchResultsWidget:
         QTimer.singleShot(100, self.process_thumbnail_queue)
     
     def apply_thumbnail_with_overlay(self, item, pixmap, similarity_percent):
+        import sip
         """Apply thumbnail dengan similarity overlay"""
         try:
+            # Skip jika item sudah None atau dihapus
+            if item is None or sip.isdeleted(item):
+                print("⚠️ Item sudah dihapus, skip setIcon()")
+                return
+
             # Scale to standard size
             scaled_pixmap = pixmap.scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            
+
             # Add overlay
             painter = QPainter(scaled_pixmap)
             painter.setRenderHint(QPainter.Antialiasing)
-            
+
             # Draw similarity badge
             badge_color = QColor(94, 114, 228, 200)
             painter.setBrush(badge_color)
             painter.setPen(Qt.NoPen)
             painter.drawEllipse(scaled_pixmap.width() - 30, 5, 25, 25)
-            
+
             # Draw percentage
             painter.setPen(Qt.white)
             font = QFont()
             font.setPointSize(9)
             font.setBold(True)
             painter.setFont(font)
-            painter.drawText(scaled_pixmap.width() - 30, 5, 25, 25, 
-                           Qt.AlignCenter, f"{similarity_percent:.0f}")
+            painter.drawText(scaled_pixmap.width() - 30, 5, 25, 25,
+                            Qt.AlignCenter, f"{similarity_percent:.0f}")
             painter.end()
-            
+
             item.setIcon(QIcon(scaled_pixmap))
-            
+
+        except RuntimeError as e:
+            print(f"❌ RuntimeError: {e}")
         except Exception as e:
             print(f"❌ Error applying overlay: {e}")
-            item.setIcon(QIcon(pixmap))
+            try:
+                if item and not sip.isdeleted(item):
+                    item.setIcon(QIcon(pixmap))
+            except:
+                pass
+
 
 
 class ThumbnailLoaderThread(QThread):
@@ -444,8 +457,7 @@ class ExplorerWindow(QMainWindow):
         
         # Insert toolbar
         self.main_layout.insertWidget(2, toolbar_widget)
-
-    # ... [KEEP ALL UTILITY METHODS] ...
+    
     def _setup_connections(self):
         """Setup signal connections"""
         # Connect file list selection changes to update download button
@@ -475,30 +487,48 @@ class ExplorerWindow(QMainWindow):
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
-    # ... [KEEP ALL FACE SEARCH METHODS] ...
+    
+    
     def open_face_search(self):
         """Open face search dialog"""
         try:
+            self.file_list.clear()
+            self.path_display.setText("🔍 Preparing face search...")
+            self.path_display.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px; color: #ff9500;")
+
+            if self.is_search_mode:
+                self.exit_search_mode()
+
+            if hasattr(self, 'search_tab_widget'):
+                self.search_tab_widget.setVisible(False)
+
+            self.file_list.setVisible(True)
+
+            # Dapatkan resnet & device dari FaceEncoder
+            resnet = FaceEncoder()
+            device = FaceEncoder.get_device()
+            api_base = FaceEncoder.get_api_base()
+
             face_detector = get_shared_detector()
-            
+
             search_dialog = FaceSearchDialog(
                 face_detector=face_detector,
                 resnet=resnet,
                 device=device,
-                api_base=API_BASE,
+                api_base=api_base,
                 parent=self
             )
-            
+
             search_dialog.search_completed.connect(self.handle_face_search_results)
-            
+
             self.log_with_timestamp("👤 Opening face search...")
             search_dialog.show()
-            
+
         except Exception as e:
             self.log_with_timestamp(f"❌ Error opening face search: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to open face search:\n{str(e)}")
 
-    # ✅ MAIN FIX - UPDATED HANDLER
+    
     def handle_face_search_results(self, results):
         """Handle results from face search with optimized loading - FIXED"""
         print(f"🔍 Explorer received {len(results)} results")
@@ -927,6 +957,7 @@ class ExplorerWindow(QMainWindow):
         """Start the download worker thread"""
         try:
             # Cancel any existing download
+            self.current_download_dir = download_dir 
             if self.download_worker and self.download_worker.isRunning():
                 self.download_worker.cancel()
                 self.download_worker.wait(3000)
@@ -968,6 +999,7 @@ class ExplorerWindow(QMainWindow):
         
     def on_download_completed(self, download_dir, total_files):
         """Handle download completion"""
+        folder_to_open = self.current_download_dir 
         self.progress_bar.setVisible(False)
         self.progress_label.setText("")
         
@@ -981,7 +1013,7 @@ class ExplorerWindow(QMainWindow):
         reply = QMessageBox.question(
             self,
             "Download Complete",
-            f"Successfully downloaded {total_files} files to:\n{download_dir}\n\nOpen download folder?",
+            f"Successfully downloaded {total_files} files to:\n{folder_to_open}\n\nOpen download folder?",
             QMessageBox.Yes | QMessageBox.No
         )
         
@@ -991,11 +1023,11 @@ class ExplorerWindow(QMainWindow):
                 import platform
                 
                 if platform.system() == "Windows":
-                    subprocess.run(["explorer", download_dir])
+                    subprocess.run(["explorer", folder_to_open])
                 elif platform.system() == "Darwin":  # macOS
-                    subprocess.run(["open", download_dir])
+                    subprocess.run(["open", folder_to_open])
                 else:  # Linux
-                    subprocess.run(["xdg-open", download_dir])
+                    subprocess.run(["xdg-open", folder_to_open])
             except Exception as e:
                 self.log_with_timestamp(f"❌ Could not open folder: {str(e)}")
     

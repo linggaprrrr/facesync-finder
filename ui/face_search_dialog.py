@@ -12,6 +12,63 @@ import json
 import requests
 import os
 
+class SearchThread(QThread):
+    results_ready = pyqtSignal(list)
+    search_failed = pyqtSignal(str)
+
+    def __init__(self, embedding, api_base):
+        super().__init__()
+        self.embedding = embedding
+        self.api_base = api_base
+
+    def run(self):
+        try:
+            url = f"{self.api_base}/faces/search-by-face"
+            request_data = {
+                "embedding": self.embedding,
+                "radius": 0.7,
+                "top_k": 100,
+                "collection_name": "face_embeddings"
+            }
+
+            response = requests.post(
+                url,
+                json=request_data,
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                results = []
+
+                if isinstance(data, dict):
+                    results = data.get("data", data.get("results", []))
+                elif isinstance(data, list):
+                    results = data
+                else:
+                    results = []
+
+                self.results_ready.emit(results)
+
+            else:
+                try:
+                    error_detail = response.json()
+                    message = error_detail.get("detail", "Search failed")
+                    if isinstance(message, dict):
+                        message = message.get("message", "Search failed")
+                    self.search_failed.emit(message)
+                except:
+                    self.search_failed.emit(f"Search failed: {response.status_code}")
+
+        except requests.exceptions.Timeout:
+            self.search_failed.emit("Search timeout - please try again")
+        except requests.exceptions.ConnectionError:
+            self.search_failed.emit("Cannot connect to server")
+        except Exception as e:
+            self.search_failed.emit(str(e))
+
+
 class FaceDetectionThread(QThread):
     """Thread for face detection and embedding"""
     face_detected = pyqtSignal(np.ndarray, list)  # image, embedding
@@ -482,18 +539,31 @@ class FaceSearchDialog(QDialog):
         """)
         
     def perform_search(self):
-        """Perform face search"""
         if not self.current_embedding:
             return
-            
+
         self.search_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.progress_bar.setRange(0, 0)
         self.results_list.clear()
         self.status_label.setText("🔍 Searching for similar faces...")
-        
-        # Perform search in thread
-        QTimer.singleShot(100, self._do_search)
+
+        self.search_thread = SearchThread(self.current_embedding, self.api_base)
+        self.search_thread.results_ready.connect(self.on_search_results)
+        self.search_thread.search_failed.connect(self.on_search_failed)
+        self.search_thread.finished.connect(self.on_search_finished)
+        self.search_thread.start()
+
+    def on_search_results(self, results):
+        self.display_results(results)
+
+    def on_search_failed(self, message):
+        self.status_label.setText(f"❌ {message}")
+
+    def on_search_finished(self):
+        self.progress_bar.setVisible(False)
+        self.search_btn.setEnabled(True)
+
             
     def _do_search(self):
         """Actual search implementation"""

@@ -17,6 +17,7 @@ a = Analysis(
         ('assets/', 'assets/'),
         ('ui/', 'ui/'),
         ('utils/', 'utils/'),
+        ('.env', '.')
     ] + tf_datas + rf_datas + tf_keras_datas,
     hiddenimports=[
         # tf_keras modules (IMPORTANT!)
@@ -81,10 +82,11 @@ exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
-    a.datas,
+    a.datas,    
     [],
     name='FaceSync - Finder',
-    debug=False,
+    debug=False,    
+    optimize=2,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
