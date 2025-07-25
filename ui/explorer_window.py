@@ -490,44 +490,105 @@ class ExplorerWindow(QMainWindow):
     
     
     def open_face_search(self):
-        """Open face search dialog"""
-        try:
-            self.file_list.clear()
-            self.path_display.setText("🔍 Preparing face search...")
-            self.path_display.setStyleSheet("font-weight: bold; font-size: 14px; padding: 5px; color: #ff9500;")
-
-            if self.is_search_mode:
-                self.exit_search_mode()
-
-            if hasattr(self, 'search_tab_widget'):
-                self.search_tab_widget.setVisible(False)
-
-            self.file_list.setVisible(True)
-
-            # Dapatkan resnet & device dari FaceEncoder
-            resnet = FaceEncoder()
-            device = FaceEncoder.get_device()
-            api_base = FaceEncoder.get_api_base()
-
-            face_detector = get_shared_detector()
-
-            search_dialog = FaceSearchDialog(
-                face_detector=face_detector,
-                resnet=resnet,
-                device=device,
-                api_base=api_base,
-                parent=self
-            )
-
-            search_dialog.search_completed.connect(self.handle_face_search_results)
-
-            self.log_with_timestamp("👤 Opening face search...")
-            search_dialog.show()
+        """Open face search dialog with comprehensive error handling"""
+        self.file_list.clear()
+        try:            
+            self.log_with_timestamp("🔄 Starting face search...")
+            
+            # Debug: Check if running in PyInstaller
+            import sys
+            if getattr(sys, 'frozen', False):
+                self.log_with_timestamp("📦 Running in PyInstaller mode")
+                bundle_dir = sys._MEIPASS
+                self.log_with_timestamp(f"📁 Bundle directory: {bundle_dir}")
+            else:
+                self.log_with_timestamp("🐍 Running in development mode")
+            
+            # Step 1: Import dengan error handling
+            self.log_with_timestamp("📦 Importing face detector...")
+            try:
+                from utils.image_processing import get_shared_detector
+                face_detector = get_shared_detector()
+                self.log_with_timestamp("✅ Face detector imported successfully")
+            except Exception as e:
+                self.log_with_timestamp(f"❌ Face detector import failed: {str(e)}")
+                self.show_error("Face detector import failed", str(e))
+                return
+            
+            # Step 2: Import FaceEncoder
+            self.log_with_timestamp("📦 Importing face encoder...")
+            try:
+                from core.device_setup import FaceEncoder
+                resnet = FaceEncoder()
+                device = FaceEncoder.get_device()
+                api_base = FaceEncoder.get_api_base()
+                self.log_with_timestamp("✅ Face encoder loaded successfully")
+            except Exception as e:
+                self.log_with_timestamp(f"❌ Face encoder import failed: {str(e)}")
+                self.show_error("Face encoder import failed", str(e))
+                return
+            
+            # Step 3: Import dialog
+            self.log_with_timestamp("📦 Importing face search dialog...")
+            try:
+                from ui.face_search_dialog import FaceSearchDialog
+                self.log_with_timestamp("✅ Dialog imported successfully")
+            except Exception as e:
+                self.log_with_timestamp(f"❌ Dialog import failed: {str(e)}")
+                self.show_error("Dialog import failed", str(e))
+                return
+            
+            # Step 4: Create dialog
+            self.log_with_timestamp("🔧 Creating face search dialog...")
+            try:
+                search_dialog = FaceSearchDialog(
+                    face_detector=face_detector,
+                    resnet=resnet,
+                    device=device,
+                    api_base=api_base,
+                    parent=self
+                )
+                self.log_with_timestamp("✅ Dialog created successfully")
+            except Exception as e:
+                self.log_with_timestamp(f"❌ Dialog creation failed: {str(e)}")
+                self.show_error("Dialog creation failed", str(e))
+                return
+            
+            # Step 5: Connect signals
+            try:
+                search_dialog.search_completed.connect(self.handle_face_search_results)
+                self.log_with_timestamp("✅ Signals connected")
+            except Exception as e:
+                self.log_with_timestamp(f"❌ Signal connection failed: {str(e)}")
+                self.show_error("Signal connection failed", str(e))
+                return
+            
+            # Step 6: Show dialog
+            self.log_with_timestamp("🎯 Showing face search dialog...")
+            try:
+                search_dialog.show()
+                self.log_with_timestamp("✅ Face search dialog shown successfully")
+            except Exception as e:
+                self.log_with_timestamp(f"❌ Dialog show failed: {str(e)}")
+                self.show_error("Dialog show failed", str(e))
+                return
 
         except Exception as e:
-            self.log_with_timestamp(f"❌ Error opening face search: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to open face search:\n{str(e)}")
+            self.log_with_timestamp(f"❌ Unexpected error in open_face_search: {str(e)}")
+            self.show_error("Unexpected error", str(e))
+            
+            # Print full traceback untuk debugging
+            import traceback
+            traceback.print_exc()
 
+    def show_error(self, title, message):
+        """Show error dialog dengan fallback"""
+        try:
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(self, title, f"{message}\n\nCheck the logs for more details.")
+        except Exception:
+            # Fallback jika QMessageBox gagal
+            print(f"ERROR: {title} - {message}")
     
     def handle_face_search_results(self, results):
         """Handle results from face search with optimized loading - FIXED"""

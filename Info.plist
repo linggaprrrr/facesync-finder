@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>FaceSearchApp</string>
+    <key>CFBundleDisplayName</key>
+    <string>Face Search Application</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.yourcompany.facesearchapp</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleExecutable</key>
+    <string>FaceSearchApp</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    
+    <!-- CRITICAL: Camera permission -->
+    <key>NSCameraUsageDescription</key>
+    <string>This app needs camera access to capture your face for searching similar photos in your collection.</string>
+    
+    <!-- Optional: Microphone permission jika diperlukan -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>This app may need microphone access for camera functionality.</string>
+    
+    <!-- Optional: Photo library access jika diperlukan -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>This app needs access to your photo library to search and organize your photos.</string>
+    
+    <!-- High DPI support -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    
+    <!-- Prevent App Nap -->
+    <key>NSAppSleepDisabled</key>
+    <true/>
+</dict>
+</plist>
