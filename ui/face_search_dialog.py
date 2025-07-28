@@ -1,9 +1,9 @@
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
-    QWidget, QProgressBar, QListWidget,
-    QListWidgetItem, QSplitter
+    QWidget, QProgressBar, QListWidget, QSlider, QCheckBox,
+    QListWidgetItem, QSplitter, QGroupBox, QSpinBox, QDoubleSpinBox
 )
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QPropertyAnimation, QEasingCurve
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QPropertyAnimation, QEasingCurve, QSettings
 from PyQt5.QtGui import QPixmap, QImage, QIcon
 import cv2
 import numpy as np
@@ -16,17 +16,18 @@ class SearchThread(QThread):
     results_ready = pyqtSignal(list)
     search_failed = pyqtSignal(str)
 
-    def __init__(self, embedding, api_base):
+    def __init__(self, embedding, api_base, radius=0.7):
         super().__init__()
         self.embedding = embedding
         self.api_base = api_base
+        self.radius = radius  # Custom radius
 
     def run(self):
         try:
             url = f"{self.api_base}/faces/search-by-face"
             request_data = {
                 "embedding": self.embedding,
-                "radius": 0.7,
+                "radius": self.radius,  # Use custom radius
                 "top_k": 100,
                 "collection_name": "face_embeddings"
             }
@@ -238,7 +239,7 @@ class CameraWidget(QWidget):
             self.capture_requested.emit(self.current_frame.copy())
 
 class FaceSearchDialog(QDialog):
-    """Beautiful face search dialog"""
+    """Enhanced face search dialog with custom radius settings"""
     search_completed = pyqtSignal(list)  # List of matching files
     
     def __init__(self, face_detector, resnet, device, api_base, parent=None):
@@ -249,9 +250,12 @@ class FaceSearchDialog(QDialog):
         self.api_base = api_base
         self.current_embedding = None
         
-        self.setWindowTitle("Face Search")
-        self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)  # Make it a separate window
-        self.resize(1000, 700)
+        # Settings management
+        self.settings = QSettings("FaceSync", "FaceSearchApp")
+        
+        self.setWindowTitle("Face Search - Enhanced")
+        self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinimizeButtonHint)
+        self.resize(1200, 750)  # Slightly larger for settings panel
         
         # Detection thread
         self.detection_thread = FaceDetectionThread(face_detector, resnet, device)
@@ -260,16 +264,17 @@ class FaceSearchDialog(QDialog):
         
         self.init_ui()
         self.setup_animations()
+        self.load_settings()  # Load saved settings
         
     def init_ui(self):
-        """Initialize UI with modern design"""
+        """Initialize UI with modern design and settings panel"""
         # Main layout
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(20)
         main_layout.setContentsMargins(20, 20, 20, 20)
         
         # Title
-        title_label = QLabel("🔍 Face Search")
+        title_label = QLabel("🔍 Enhanced Face Search")
         title_label.setStyleSheet("""
             QLabel {
                 font-size: 24px;
@@ -278,6 +283,10 @@ class FaceSearchDialog(QDialog):
             }
         """)
         main_layout.addWidget(title_label)
+        
+        # Settings Panel (NEW)
+        self.create_settings_panel()
+        main_layout.addWidget(self.settings_group)
         
         # Content area with splitter
         splitter = QSplitter(Qt.Horizontal)
@@ -297,7 +306,7 @@ class FaceSearchDialog(QDialog):
         # Auto-capture toggle with modern styling - DEFAULT ON
         self.auto_capture_btn = QPushButton("🔄 Auto Capture: ON")
         self.auto_capture_btn.setCheckable(True)
-        self.auto_capture_btn.setChecked(True)  # Set default to ON
+        self.auto_capture_btn.setChecked(True)
         self.auto_capture_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -424,7 +433,7 @@ class FaceSearchDialog(QDialog):
         results_layout.addWidget(self.progress_bar)
         
         splitter.addWidget(results_container)
-        splitter.setSizes([600, 400])
+        splitter.setSizes([700, 500])  # Adjust for settings panel
         
         main_layout.addWidget(splitter)
         
@@ -464,6 +473,195 @@ class FaceSearchDialog(QDialog):
                 background-color: #f5f5f5;
             }
         """)
+    
+    def create_settings_panel(self):
+        """Create settings panel with similarity radius control"""
+        self.settings_group = QGroupBox("🔧 Search Settings")
+        self.settings_group.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                color: #333;
+                border: 2px solid #e0e0e0;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        
+        settings_layout = QHBoxLayout(self.settings_group)
+        settings_layout.setSpacing(20)
+        
+        # Similarity threshold setting
+        similarity_widget = QWidget()
+        similarity_layout = QVBoxLayout(similarity_widget)
+        similarity_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Label
+        sim_label = QLabel("🎯 Similarity Threshold:")
+        sim_label.setStyleSheet("font-size: 14px; font-weight: 600; color: #333;")
+        similarity_layout.addWidget(sim_label)
+        
+        # Slider and spinbox container
+        slider_container = QWidget()
+        slider_layout = QHBoxLayout(slider_container)
+        slider_layout.setContentsMargins(0, 0, 0, 0)
+        slider_layout.setSpacing(10)
+        
+        # Slider (70% to 90%)
+        self.radius_slider = QSlider(Qt.Horizontal)
+        self.radius_slider.setMinimum(70)  # 70%
+        self.radius_slider.setMaximum(90)  # 90%
+        self.radius_slider.setValue(70)    # Default 70%
+        self.radius_slider.setTickPosition(QSlider.TicksBelow)
+        self.radius_slider.setTickInterval(5)
+        self.radius_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #999999;
+                height: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #B1B1B1, stop:1 #c4c4c4);
+                margin: 2px 0;
+                border-radius: 4px;
+            }
+            QSlider::handle:horizontal {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5e72e4, stop:1 #4c63d2);
+                border: 1px solid #5c5c5c;
+                width: 18px;
+                margin: -2px 0;
+                border-radius: 9px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #6b7fe6, stop:1 #5970d4);
+            }
+        """)
+        
+        # SpinBox for precise control
+        self.radius_spinbox = QSpinBox()
+        self.radius_spinbox.setMinimum(70)
+        self.radius_spinbox.setMaximum(90)
+        self.radius_spinbox.setValue(70)
+        self.radius_spinbox.setSuffix("%")
+        self.radius_spinbox.setStyleSheet("""
+            QSpinBox {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 5px;
+                font-size: 14px;
+                min-width: 60px;
+            }
+            QSpinBox:focus {
+                border-color: #5e72e4;
+            }
+        """)
+        
+        # Connect slider and spinbox
+        self.radius_slider.valueChanged.connect(self.radius_spinbox.setValue)
+        self.radius_spinbox.valueChanged.connect(self.radius_slider.setValue)
+        self.radius_slider.valueChanged.connect(self.on_radius_changed)
+        
+        slider_layout.addWidget(self.radius_slider)
+        slider_layout.addWidget(self.radius_spinbox)
+        
+        similarity_layout.addWidget(slider_container)
+        
+        # Info label
+        self.radius_info_label = QLabel("Higher values = More strict matching")
+        self.radius_info_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                color: #666;
+                font-style: italic;
+            }
+        """)
+        similarity_layout.addWidget(self.radius_info_label)
+        
+        settings_layout.addWidget(similarity_widget)
+        
+        # Add some spacing
+        settings_layout.addStretch()
+        
+        # Auto-save checkbox
+        self.auto_save_checkbox = QCheckBox("💾 Auto-save settings")
+        self.auto_save_checkbox.setChecked(True)
+        self.auto_save_checkbox.setStyleSheet("""
+            QCheckBox {
+                font-size: 14px;
+                color: #333;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 2px solid #ddd;
+                border-radius: 3px;
+                background-color: white;
+            }
+            QCheckBox::indicator:checked {
+                border: 2px solid #5e72e4;
+                border-radius: 3px;
+                background-color: #5e72e4;
+                image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTQiIGhlaWdodD0iMTAiIHZpZXdCb3g9IjAgMCAxNCAxMCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTEgNUw1IDlMMTMgMSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+);
+            }
+        """)
+        settings_layout.addWidget(self.auto_save_checkbox)
+    
+    def on_radius_changed(self, value):
+        """Handle radius change"""
+        radius_decimal = value / 100.0  # Convert percentage to decimal
+        self.radius_info_label.setText(f"Current threshold: {value}% ({radius_decimal:.2f}) - {'Very Strict' if value > 85 else 'Strict' if value > 80 else 'Moderate' if value > 75 else 'Relaxed'}")
+        
+        # Auto-save if enabled
+        if self.auto_save_checkbox.isChecked():
+            self.save_settings()
+    
+    def load_settings(self):
+        """Load settings from QSettings"""
+        try:
+            # Load similarity radius (default 70%)
+            saved_radius = self.settings.value("similarity_radius", 70, type=int)
+            saved_radius = max(70, min(90, saved_radius))  # Clamp to valid range
+            
+            self.radius_slider.setValue(saved_radius)
+            self.radius_spinbox.setValue(saved_radius)
+            
+            # Load auto-save preference
+            auto_save = self.settings.value("auto_save_settings", True, type=bool)
+            self.auto_save_checkbox.setChecked(auto_save)
+            
+            print(f"✅ Settings loaded: radius={saved_radius}%, auto_save={auto_save}")
+            
+        except Exception as e:
+            print(f"⚠️ Error loading settings: {e}")
+            # Use defaults
+            self.radius_slider.setValue(70)
+            self.radius_spinbox.setValue(70)
+    
+    def save_settings(self):
+        """Save settings to QSettings"""
+        try:
+            self.settings.setValue("similarity_radius", self.radius_spinbox.value())
+            self.settings.setValue("auto_save_settings", self.auto_save_checkbox.isChecked())
+            self.settings.sync()
+            
+            print(f"💾 Settings saved: radius={self.radius_spinbox.value()}%")
+            
+        except Exception as e:
+            print(f"❌ Error saving settings: {e}")
+    
+    def closeEvent(self, event):
+        """Save settings on close"""
+        self.save_settings()  # Always save on close
+        self.camera_widget.stop_camera()
+        if self.auto_capture_timer.isActive():
+            self.auto_capture_timer.stop()
+        super().closeEvent(event)
         
     def setup_animations(self):
         """Setup animations"""
@@ -485,13 +683,6 @@ class FaceSearchDialog(QDialog):
         else:
             self.status_label.setText("❌ Failed to start camera")
             
-    def closeEvent(self, event):
-        """Stop camera when dialog closes"""
-        self.camera_widget.stop_camera()
-        if self.auto_capture_timer.isActive():
-            self.auto_capture_timer.stop()
-        super().closeEvent(event)
-        
     def toggle_auto_capture(self, checked):
         """Toggle auto capture mode"""
         if checked:
@@ -539,107 +730,47 @@ class FaceSearchDialog(QDialog):
         """)
         
     def perform_search(self):
+        """Perform search with custom radius"""
         if not self.current_embedding:
             return
 
+        # Get custom radius from settings
+        radius = self.radius_spinbox.value() / 100.0  # Convert to decimal
+        
         self.search_btn.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         self.results_list.clear()
-        self.status_label.setText("🔍 Searching for similar faces...")
+        self.status_label.setText(f"🔍 Searching with {self.radius_spinbox.value()}% similarity threshold...")
 
-        self.search_thread = SearchThread(self.current_embedding, self.api_base)
+        # Use custom radius
+        self.search_thread = SearchThread(self.current_embedding, self.api_base, radius)
         self.search_thread.results_ready.connect(self.on_search_results)
         self.search_thread.search_failed.connect(self.on_search_failed)
         self.search_thread.finished.connect(self.on_search_finished)
         self.search_thread.start()
 
     def on_search_results(self, results):
+        """Handle search results"""
         self.display_results(results)
 
     def on_search_failed(self, message):
+        """Handle search failure"""
         self.status_label.setText(f"❌ {message}")
+        self.status_label.setStyleSheet("""
+            QLabel {
+                background-color: #5a2d2d;
+                color: #FFA07A;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+        """)
 
     def on_search_finished(self):
+        """Handle search completion"""
         self.progress_bar.setVisible(False)
         self.search_btn.setEnabled(True)
-
-            
-    def _do_search(self):
-        """Actual search implementation"""
-        try:
-            # Debug: Print embedding info
-            print(f"Searching with embedding of length: {len(self.current_embedding)}")
-            
-            # Choose endpoint based on your backend implementation
-            url = f"{self.api_base}/faces/search-by-face"
-            request_data = {
-                "embedding": self.current_embedding,
-                "radius": 0.7,  # Similarity threshold
-                "top_k": 100,    # Max results
-                "collection_name": "face_embeddings"
-            }
-            
-            print(f"Sending request to: {url}")
-            
-            response = requests.post(
-                url,
-                json=request_data,
-                headers={"Content-Type": "application/json"},
-                timeout=30
-            )
-            
-            print(f"Response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                print(f"Response data keys: {data.keys()}")
-                
-                # Handle different response formats
-                results = []
-                if "data" in data:
-                    results = data.get("data", [])  # Full endpoint response
-                elif "results" in data:
-                    results = data.get("results", [])  # Simple endpoint response
-                else:
-                    # Maybe the response is the array directly?
-                    if isinstance(data, list):
-                        results = data
-                
-                print(f"Found {len(results)} results")
-                if results:
-                    print(f"First result: {results[0]}")
-                    # Check similarity values from backend
-                    for i, r in enumerate(results[:3]):
-                        sim = r.get('similarity', 0)
-                        print(f"Result {i} similarity from backend: {sim}")
-                    
-                self.display_results(results)
-            else:
-                error_msg = "Search failed"
-                try:
-                    error_detail = response.json()
-                    print(f"Error response: {error_detail}")
-                    if isinstance(error_detail, dict):
-                        error_msg = error_detail.get("detail", error_msg)
-                        if isinstance(error_msg, dict):
-                            error_msg = error_msg.get("message", "Search failed")
-                except:
-                    error_msg = f"Search failed: {response.status_code}"
-                self.status_label.setText(f"❌ {error_msg}")
-                
-        except requests.exceptions.Timeout:
-            self.status_label.setText("❌ Search timeout - please try again")
-        except requests.exceptions.ConnectionError:
-            self.status_label.setText("❌ Cannot connect to server")
-        except Exception as e:
-            self.status_label.setText(f"❌ Error: {str(e)}")
-            print(f"Search error details: {e}")  # Debug logging
-            import traceback
-            traceback.print_exc()
-        finally:
-            self.progress_bar.setVisible(False)
-            self.search_btn.setEnabled(True)
             
     def display_results(self, results):
         """Display search results - PRESERVE FILENAME"""
@@ -649,11 +780,11 @@ class FaceSearchDialog(QDialog):
             
         self.status_label.setText(f"✅ Found {len(results)} matching images")
         
-        # Format results untuk explorer window - PRESERVE ALL FIELDS
+        # Format results for explorer window - PRESERVE ALL FIELDS
         formatted_results = []
         
         for result in results:
-            # Extract semua field
+            # Extract all fields
             file_path = result.get('original_path', '') or result.get('file_path', '')
             similarity = result.get('similarity', 0)
             photo_id = result.get('photo_id', '')
@@ -661,12 +792,12 @@ class FaceSearchDialog(QDialog):
             thumbnail_path = result.get('thumbnail_path', '')
             original_path = result.get('original_path', '')
             
-            # CRITICAL: Preserve filename dari backend
+            # CRITICAL: Preserve filename from backend
             filename = result.get('filename', '')
             
             print(f"🔍 Backend result: filename='{filename}', photo_id={photo_id}")
             
-            # Fallback filename extraction jika kosong
+            # Fallback filename extraction if empty
             if not filename:
                 if original_path:
                     if original_path.startswith(('http://', 'https://')):
@@ -678,11 +809,11 @@ class FaceSearchDialog(QDialog):
                 else:
                     filename = f"{photo_id}.jpg"
             
-            # Skip jika tidak ada data berguna
+            # Skip if no useful data
             if not file_path:
                 continue
             
-            # Create list item untuk dialog (YANG INI OPSIONAL - untuk display di dialog)
+            # Create list item for dialog (OPTIONAL - for display in dialog)
             item = QListWidgetItem()
             
             similarity = max(0, min(1, similarity))
@@ -694,7 +825,7 @@ class FaceSearchDialog(QDialog):
             
             self.results_list.addItem(item)
             
-            # IMPORTANT: Preserve SEMUA field termasuk filename untuk ExplorerWindow
+            # IMPORTANT: Preserve ALL fields including filename for ExplorerWindow
             formatted_results.append({
                 "file_path": file_path,
                 "filename": filename,  # ← CRITICAL: Include filename!
@@ -705,11 +836,11 @@ class FaceSearchDialog(QDialog):
                 "original_path": original_path
             })
         
-        # Debug: Print apa yang akan dikirim ke ExplorerWindow
+        # Debug: Print what will be sent to ExplorerWindow
         print(f"📤 Sending to Explorer: {len(formatted_results)} results")
         for i, r in enumerate(formatted_results[:3]):  # Print first 3
             print(f"  Result {i}: filename='{r['filename']}', similarity={r.get('similarity', 0):.3f}")
         
-        # Emit ke ExplorerWindow dengan filename yang sudah preserved
+        # Emit to ExplorerWindow with preserved filename
         if formatted_results:
             self.search_completed.emit(formatted_results)

@@ -493,7 +493,7 @@ class ExplorerWindow(QMainWindow):
         """Open face search dialog with comprehensive error handling"""
         self.file_list.clear()
         try:            
-            self.log_with_timestamp("🔄 Starting face search...")
+            # self.log_with_timestamp("🔄 Starting face search...")
             
             # Debug: Check if running in PyInstaller
             import sys
@@ -501,45 +501,44 @@ class ExplorerWindow(QMainWindow):
                 self.log_with_timestamp("📦 Running in PyInstaller mode")
                 bundle_dir = sys._MEIPASS
                 self.log_with_timestamp(f"📁 Bundle directory: {bundle_dir}")
-            else:
-                self.log_with_timestamp("🐍 Running in development mode")
+            
             
             # Step 1: Import dengan error handling
-            self.log_with_timestamp("📦 Importing face detector...")
+            # self.log_with_timestamp("📦 Importing face detector...")
             try:
                 from utils.image_processing import get_shared_detector
                 face_detector = get_shared_detector()
-                self.log_with_timestamp("✅ Face detector imported successfully")
+                # self.log_with_timestamp("✅ Face detector imported successfully")
             except Exception as e:
                 self.log_with_timestamp(f"❌ Face detector import failed: {str(e)}")
                 self.show_error("Face detector import failed", str(e))
                 return
             
             # Step 2: Import FaceEncoder
-            self.log_with_timestamp("📦 Importing face encoder...")
+            # self.log_with_timestamp("📦 Importing face encoder...")
             try:
                 from core.device_setup import FaceEncoder
                 resnet = FaceEncoder()
                 device = FaceEncoder.get_device()
                 api_base = FaceEncoder.get_api_base()
-                self.log_with_timestamp("✅ Face encoder loaded successfully")
+                # self.log_with_timestamp("✅ Face encoder loaded successfully")
             except Exception as e:
                 self.log_with_timestamp(f"❌ Face encoder import failed: {str(e)}")
                 self.show_error("Face encoder import failed", str(e))
                 return
             
             # Step 3: Import dialog
-            self.log_with_timestamp("📦 Importing face search dialog...")
+            # self.log_with_timestamp("📦 Importing face search dialog...")
             try:
                 from ui.face_search_dialog import FaceSearchDialog
-                self.log_with_timestamp("✅ Dialog imported successfully")
+                # self.log_with_timestamp("✅ Dialog imported successfully")
             except Exception as e:
                 self.log_with_timestamp(f"❌ Dialog import failed: {str(e)}")
                 self.show_error("Dialog import failed", str(e))
                 return
             
             # Step 4: Create dialog
-            self.log_with_timestamp("🔧 Creating face search dialog...")
+            # self.log_with_timestamp("🔧 Creating face search dialog...")
             try:
                 search_dialog = FaceSearchDialog(
                     face_detector=face_detector,
@@ -548,7 +547,7 @@ class ExplorerWindow(QMainWindow):
                     api_base=api_base,
                     parent=self
                 )
-                self.log_with_timestamp("✅ Dialog created successfully")
+                # self.log_with_timestamp("✅ Dialog created successfully")
             except Exception as e:
                 self.log_with_timestamp(f"❌ Dialog creation failed: {str(e)}")
                 self.show_error("Dialog creation failed", str(e))
@@ -557,17 +556,17 @@ class ExplorerWindow(QMainWindow):
             # Step 5: Connect signals
             try:
                 search_dialog.search_completed.connect(self.handle_face_search_results)
-                self.log_with_timestamp("✅ Signals connected")
+                # self.log_with_timestamp("✅ Signals connected")
             except Exception as e:
                 self.log_with_timestamp(f"❌ Signal connection failed: {str(e)}")
                 self.show_error("Signal connection failed", str(e))
                 return
             
             # Step 6: Show dialog
-            self.log_with_timestamp("🎯 Showing face search dialog...")
+            # self.log_with_timestamp("🎯 Showing face search dialog...")
             try:
                 search_dialog.show()
-                self.log_with_timestamp("✅ Face search dialog shown successfully")
+                # self.log_with_timestamp("✅ Face search dialog shown successfully")
             except Exception as e:
                 self.log_with_timestamp(f"❌ Dialog show failed: {str(e)}")
                 self.show_error("Dialog show failed", str(e))
@@ -716,7 +715,7 @@ class ExplorerWindow(QMainWindow):
         print(f"✅ Basic population completed. Items added: {list_widget.count()}")
 
     def setup_multi_outlet_tabs_optimized(self, outlet_groups):
-        """Setup multiple outlet tabs with WORKING thumbnail loading"""
+        """Setup multiple outlet tabs with HIGHEST SIMILARITY FIRST and thumbnail loading"""
         print(f"🏪 Setting up {len(outlet_groups)} outlet tabs - WITH THUMBNAILS")
         
         self.file_list.setVisible(False)
@@ -748,9 +747,34 @@ class ExplorerWindow(QMainWindow):
         self.search_tab_widget.clear()
         self.search_tab_widget.setVisible(True)
         
-        # CREATE TABS WITH THUMBNAIL LOADING
-        for outlet_name, outlet_results in sorted(outlet_groups.items()):
-            print(f"📋 Creating tab: {outlet_name} with {len(outlet_results)} items")
+        # ✅ NEW: Calculate highest similarity for each outlet and sort
+        outlet_with_max_similarity = []
+        
+        for outlet_name, outlet_results in outlet_groups.items():
+            # Find highest similarity in this outlet
+            max_similarity = max((result.get('similarity', 0) for result in outlet_results), default=0)
+            outlet_with_max_similarity.append({
+                'outlet_name': outlet_name,
+                'results': outlet_results,
+                'max_similarity': max_similarity,
+                'count': len(outlet_results)
+            })
+            print(f"📊 Outlet '{outlet_name}': {len(outlet_results)} results, max similarity: {max_similarity:.3f}")
+        
+        # ✅ Sort by highest similarity DESCENDING
+        outlet_with_max_similarity.sort(key=lambda x: x['max_similarity'], reverse=True)
+        
+        print("🎯 Tab order by highest similarity:")
+        for i, outlet_info in enumerate(outlet_with_max_similarity):
+            print(f"  Tab {i+1}: {outlet_info['outlet_name']} (max: {outlet_info['max_similarity']:.1%})")
+        
+        # CREATE TABS IN SORTED ORDER WITH THUMBNAIL LOADING
+        for outlet_info in outlet_with_max_similarity:
+            outlet_name = outlet_info['outlet_name']
+            outlet_results = outlet_info['results']
+            max_similarity = outlet_info['max_similarity']
+            
+            print(f"📋 Creating tab: {outlet_name} with {len(outlet_results)} items (max: {max_similarity:.1%})")
             
             # Create list widget
             outlet_list = QListWidget()
@@ -774,11 +798,75 @@ class ExplorerWindow(QMainWindow):
             outlet_list.itemDoubleClicked.connect(self._open_search_result)
             self.connect_selection_handlers(outlet_list)
             
-            # Add tab
-            tab_label = f"{outlet_name} ({len(outlet_results)})"
+            # Add tab with similarity info
+            tab_label = f"{outlet_name} ({len(outlet_results)}) - {max_similarity:.0%}"
             self.search_tab_widget.addTab(outlet_list, tab_label)
         
-        print(f"✅ All tabs created with thumbnail loading. Tab count: {self.search_tab_widget.count()}")
+        print(f"✅ All tabs created with thumbnail loading in similarity order. Tab count: {self.search_tab_widget.count()}")
+    # def setup_multi_outlet_tabs_optimized(self, outlet_groups):
+    #     """Setup multiple outlet tabs with WORKING thumbnail loading"""
+    #     print(f"🏪 Setting up {len(outlet_groups)} outlet tabs - WITH THUMBNAILS")
+        
+    #     self.file_list.setVisible(False)
+        
+    #     # Create tab widget  
+    #     if not hasattr(self, 'search_tab_widget'):
+    #         self.search_tab_widget = QTabWidget()
+    #         self.search_tab_widget.setStyleSheet("""
+    #             QTabWidget::pane {
+    #                 background-color: white;
+    #                 border: 1px solid #e0e0e0;
+    #                 border-radius: 8px;
+    #             }
+    #             QTabBar::tab {
+    #                 background-color: #f8f9fa;
+    #                 color: #333;
+    #                 padding: 8px 16px;
+    #                 margin-right: 2px;
+    #                 border-top-left-radius: 6px;
+    #                 border-top-right-radius: 6px;
+    #             }
+    #             QTabBar::tab:selected {
+    #                 background-color: #5e72e4;
+    #                 color: white;
+    #             }
+    #         """)
+    #         self.main_layout.insertWidget(3, self.search_tab_widget)
+        
+    #     self.search_tab_widget.clear()
+    #     self.search_tab_widget.setVisible(True)
+        
+    #     # CREATE TABS WITH THUMBNAIL LOADING
+    #     for outlet_name, outlet_results in sorted(outlet_groups.items()):
+    #         print(f"📋 Creating tab: {outlet_name} with {len(outlet_results)} items")
+            
+    #         # Create list widget
+    #         outlet_list = QListWidget()
+    #         outlet_list.setViewMode(QListView.IconMode)
+    #         outlet_list.setIconSize(QPixmap(100, 100).size())
+    #         outlet_list.setResizeMode(QListView.Adjust)
+    #         outlet_list.setSpacing(10)
+    #         outlet_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
+    #         outlet_list.setWordWrap(True)
+    #         outlet_list.setGridSize(QPixmap(140, 140).size())
+    #         outlet_list.setStyleSheet(self.file_list.styleSheet())
+            
+    #         # Use OptimizedSearchResultsWidget for thumbnail loading
+    #         tab_optimizer = OptimizedSearchResultsWidget(outlet_list, self)
+    #         tab_optimizer.populate_results_optimized(outlet_results)
+    #         self.search_optimizers.append(tab_optimizer)
+            
+    #         print(f"✅ Added thumbnail loading for {outlet_name} tab")
+            
+    #         # Connect events
+    #         outlet_list.itemDoubleClicked.connect(self._open_search_result)
+    #         self.connect_selection_handlers(outlet_list)
+            
+    #         # Add tab
+    #         tab_label = f"{outlet_name} ({len(outlet_results)})"
+    #         self.search_tab_widget.addTab(outlet_list, tab_label)
+        
+    #     print(f"✅ All tabs created with thumbnail loading. Tab count: {self.search_tab_widget.count()}")
 
     
     def on_tab_changed(self, index):
@@ -873,7 +961,7 @@ class ExplorerWindow(QMainWindow):
             # Connect the download signal from preview to main window
             dialog.download_requested.connect(self.handle_preview_download)
             dialog.exec_()
-            self.log_with_timestamp("✅ Image preview completed")
+            # self.log_with_timestamp("✅ Image preview completed")
         except Exception as e:
             self.log_with_timestamp(f"❌ Error opening preview: {str(e)}")
     

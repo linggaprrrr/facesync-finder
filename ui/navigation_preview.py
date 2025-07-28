@@ -1,19 +1,19 @@
-
 import os
 import logging
 import requests
 import tempfile
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QPixmap, QKeySequence
+from PyQt5.QtGui import QPixmap, QKeySequence, QImage
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QCheckBox, QApplication, QMessageBox, QShortcut
 )
+
 logger = logging.getLogger(__name__)
 
 
 class NavigationPreviewDialog(QDialog):
-    """Fixed preview dialog dengan proper cleanup and working download"""
+    """Fixed preview dialog with proper cleanup, working download, and image rotation fix"""
     
     # Signals untuk communicate back ke parent
     selection_changed = pyqtSignal(int, bool)  # index, is_selected
@@ -442,26 +442,122 @@ class NavigationPreviewDialog(QDialog):
             self.is_loading = False
             self.update_ui_info()  # Update button states
     
+    def fix_image_orientation(self, image_path_or_data, is_url=False):
+        """
+        ✅ NEW: Fix EXIF orientation for both local files and URL data
+        Returns QPixmap with correct orientation or None if failed
+        """
+        try:
+            # Import Pillow untuk EXIF handling
+            from PIL import Image
+            from PIL.ExifTags import ORIENTATION
+            import numpy as np
+            from io import BytesIO
+            
+            # Load image based on type
+            if is_url:
+                # For URL data (bytes)
+                pil_image = Image.open(BytesIO(image_path_or_data))
+            else:
+                # For local file path
+                pil_image = Image.open(image_path_or_data)
+            
+            print(f"🖼️ Original image size: {pil_image.size}, mode: {pil_image.mode}")
+            
+            # Check for EXIF orientation and apply rotation
+            orientation_applied = False
+            try:
+                exif = pil_image._getexif()
+                if exif is not None:
+                    orientation = exif.get(ORIENTATION)
+                    if orientation:
+                        print(f"🔄 EXIF orientation found: {orientation}")
+                        
+                        # Apply rotation based on EXIF orientation
+                        if orientation == 3:
+                            pil_image = pil_image.rotate(180, expand=True)
+                            orientation_applied = True
+                            print("🔄 Applied 180° rotation")
+                        elif orientation == 6:
+                            pil_image = pil_image.rotate(270, expand=True)
+                            orientation_applied = True
+                            print("🔄 Applied 270° rotation (90° CCW)")
+                        elif orientation == 8:
+                            pil_image = pil_image.rotate(90, expand=True)
+                            orientation_applied = True
+                            print("🔄 Applied 90° rotation (90° CW)")
+                        else:
+                            print(f"✅ No rotation needed for orientation {orientation}")
+                    else:
+                        print("✅ No EXIF orientation data found")
+                else:
+                    print("✅ No EXIF data found")
+            except Exception as e:
+                print(f"⚠️ EXIF processing failed (non-critical): {e}")
+            
+            # Convert PIL Image to QPixmap
+            if pil_image.mode != 'RGB':
+                pil_image = pil_image.convert('RGB')
+                print(f"🔄 Converted to RGB mode")
+            
+            # Convert to numpy array then to QImage
+            np_array = np.array(pil_image)
+            height, width, channels = np_array.shape
+            bytes_per_line = channels * width
+            
+            # Create QImage
+            q_image = QImage(np_array.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            
+            # Convert to QPixmap
+            pixmap = QPixmap.fromImage(q_image)
+            
+            if orientation_applied:
+                print(f"✅ Image orientation fixed! New size: {pixmap.width()}x{pixmap.height()}")
+            else:
+                print(f"✅ Image loaded without rotation: {pixmap.width()}x{pixmap.height()}")
+            
+            return pixmap
+            
+        except ImportError:
+            print("❌ Pillow not installed. Install with: pip install Pillow")
+            return None
+        except Exception as e:
+            print(f"❌ Error fixing image orientation: {e}")
+            return None
+    
     def load_image_from_url(self, url):
-        """Load image from URL"""
+        """Load image from URL with orientation fix"""
         if self.is_closing:
             return
             
         try:
+            print(f"🌐 Downloading image from URL...")
             response = requests.get(url, timeout=15)
             if response.status_code == 200:
-                with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-                    tmp_file.write(response.content)
-                    temp_path = tmp_file.name
+                print(f"✅ Downloaded {len(response.content)} bytes")
                 
-                self.temp_files.append(temp_path)
-                self.load_image_from_file(temp_path)
+                # ✅ Try to fix orientation first
+                pixmap = self.fix_image_orientation(response.content, is_url=True)
                 
+                if pixmap and not pixmap.isNull():
+                    print("✅ Using orientation-fixed image")
+                    self.display_pixmap(pixmap)
+                else:
+                    print("⚠️ Orientation fix failed, using fallback")
+                    # Fallback to old method
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
+                        tmp_file.write(response.content)
+                        temp_path = tmp_file.name
+                    
+                    self.temp_files.append(temp_path)
+                    self.load_image_from_file_fallback(temp_path)
+                    
             else:
                 self.image_label.setText(f"❌ Download failed\n\nStatus: {response.status_code}")
         except Exception as e:
             if not self.is_closing:  # Only show error if not closing
                 self.image_label.setText(f"❌ Download error\n\n{str(e)}")
+                print(f"❌ URL download error: {e}")
         finally:
             # Clear loading flag setelah selesai
             self.is_loading = False
@@ -469,16 +565,55 @@ class NavigationPreviewDialog(QDialog):
                 self.update_ui_info()
     
     def load_image_from_file(self, file_path):
-        """Load image from file"""
+        """Load image from file with orientation fix"""
         if self.is_closing:
             return
             
+        try:
+            print(f"📁 Loading image from file: {os.path.basename(file_path)}")
+            
+            # ✅ Try to fix orientation first
+            pixmap = self.fix_image_orientation(file_path, is_url=False)
+            
+            if pixmap and not pixmap.isNull():
+                print("✅ Using orientation-fixed image")
+                self.display_pixmap(pixmap)
+            else:
+                print("⚠️ Orientation fix failed, using fallback")
+                # Fallback to old method
+                self.load_image_from_file_fallback(file_path)
+                
+        except Exception as e:
+            if not self.is_closing:
+                self.image_label.setText(f"❌ Error loading image\n\n{str(e)}")
+                print(f"❌ File load error: {e}")
+        finally:
+            # Clear loading flag setelah selesai
+            self.is_loading = False
+            if not self.is_closing:
+                self.update_ui_info()
+    
+    def load_image_from_file_fallback(self, file_path):
+        """Fallback method without orientation fix"""
         try:
             pixmap = QPixmap(file_path)
             if pixmap.isNull():
                 self.image_label.setText("❌ Invalid image file")
                 return
             
+            print("⚠️ Using fallback loading without orientation fix")
+            self.display_pixmap(pixmap)
+            
+        except Exception as e:
+            if not self.is_closing:
+                self.image_label.setText(f"❌ Error loading image\n\n{str(e)}")
+    
+    def display_pixmap(self, pixmap):
+        """Display pixmap with proper scaling and dialog resizing"""
+        if self.is_closing or pixmap.isNull():
+            return
+            
+        try:
             # Get screen size for scaling
             screen = QApplication.primaryScreen()
             screen_rect = screen.availableGeometry()
@@ -490,8 +625,10 @@ class NavigationPreviewDialog(QDialog):
                 scaled_pixmap = pixmap.scaled(max_width, max_height, 
                                             Qt.KeepAspectRatio, 
                                             Qt.SmoothTransformation)
+                print(f"🔄 Scaled image: {pixmap.width()}x{pixmap.height()} → {scaled_pixmap.width()}x{scaled_pixmap.height()}")
             else:
                 scaled_pixmap = pixmap
+                print(f"✅ Image fits screen: {pixmap.width()}x{pixmap.height()}")
             
             # IMPORTANT: Check if still not closing before setting pixmap
             if not self.is_closing:
@@ -510,15 +647,13 @@ class NavigationPreviewDialog(QDialog):
                 x = (screen_rect.width() - dialog_width) // 2
                 y = (screen_rect.height() - dialog_height) // 2
                 self.move(x, y)
+                
+                print(f"✅ Image displayed and dialog resized to {dialog_width}x{dialog_height}")
             
         except Exception as e:
             if not self.is_closing:
-                self.image_label.setText(f"❌ Error loading image\n\n{str(e)}")
-        finally:
-            # Clear loading flag setelah selesai
-            self.is_loading = False
-            if not self.is_closing:
-                self.update_ui_info()
+                self.image_label.setText(f"❌ Error displaying image\n\n{str(e)}")
+                print(f"❌ Display error: {e}")
     
     def previous_image(self):
         """Go to previous image"""
@@ -578,13 +713,6 @@ class NavigationPreviewDialog(QDialog):
             
             # Emit signal to parent dengan selected items data
             self.download_requested.emit(selected_items)
-            
-            # # Show confirmation
-            # QMessageBox.information(
-            #     self, 
-            #     "Download Started", 
-            #     f"Download of {len(selected_items)} images has been started.\n\nCheck the main window for progress."
-            # )
             
         except Exception as e:
             print(f"❌ Error in download_selected: {e}")
