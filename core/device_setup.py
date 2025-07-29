@@ -8,7 +8,7 @@ API_BASE = "https://api.ownize.app"
 
 class FaceEncoder:
     _resnet = None
-    _device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    _device = "cpu"
 
     def __new__(cls):
         if cls._resnet is None:
