@@ -1159,26 +1159,26 @@ class ExplorerWindow(QMainWindow):
         self.log_with_timestamp(f"🎉 Download completed! {total_files} files saved to {download_dir}")
         
         # Show completion message
-        reply = QMessageBox.question(
-            self,
-            "Download Complete",
-            f"Successfully downloaded {total_files} files to:\n{folder_to_open}\n\nOpen download folder?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        # reply = QMessageBox.question(
+        #     self,
+        #     "Download Complete",
+        #     f"Successfully downloaded {total_files} files to:\n{folder_to_open}\n\nOpen download folder?",
+        #     QMessageBox.Yes | QMessageBox.No
+        # )
         
-        if reply == QMessageBox.Yes:
-            try:
-                import subprocess
-                import platform
+        # if reply == QMessageBox.Yes:
+        #     try:
+        #         import subprocess
+        #         import platform
                 
-                if platform.system() == "Windows":
-                    subprocess.run(["explorer", folder_to_open])
-                elif platform.system() == "Darwin":  # macOS
-                    subprocess.run(["open", folder_to_open])
-                else:  # Linux
-                    subprocess.run(["xdg-open", folder_to_open])
-            except Exception as e:
-                self.log_with_timestamp(f"❌ Could not open folder: {str(e)}")
+        #         if platform.system() == "Windows":
+        #             subprocess.run(["explorer", folder_to_open])
+        #         elif platform.system() == "Darwin":  # macOS
+        #             subprocess.run(["open", folder_to_open])
+        #         else:  # Linux
+        #             subprocess.run(["xdg-open", folder_to_open])
+        #     except Exception as e:
+        #         self.log_with_timestamp(f"❌ Could not open folder: {str(e)}")
     
     def on_download_error(self, error_message):
         """Handle download errors"""
