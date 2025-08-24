@@ -104,7 +104,7 @@ class DownloadWorker(QThread):
 
 
 class OptimizedSearchResultsWidget:
-    """Widget optimizer untuk search results dengan smart thumbnail loading"""
+    """Fixed widget for proper thumbnail loading"""
     
     def __init__(self, list_widget, parent_window):
         self.list_widget = list_widget
@@ -112,7 +112,7 @@ class OptimizedSearchResultsWidget:
         self.thumbnail_cache = {}
         self.loading_queue = []
         self.currently_loading = set()
-        self.max_concurrent = 3  # Max 3 downloads bersamaan
+        self.max_concurrent = 3
         
         # Start thumbnail loader thread
         self.thumbnail_loader = ThumbnailLoaderThread()
@@ -120,14 +120,14 @@ class OptimizedSearchResultsWidget:
         self.thumbnail_loader.start()
     
     def populate_results_optimized(self, results):
-        """Populate results dengan optimized thumbnail loading"""
-        print(f"🚀 Optimized loading: {len(results)} items")
+        """Populate results with proper thumbnail URLs"""
+        print(f"Loading {len(results)} items with thumbnails")
         
         for i, result in enumerate(results):
             # Extract data
             file_path = result.get('file_path', '')
             original_path = result.get('original_path', '')
-            thumbnail_path = result.get('thumbnail_path', '')
+            thumbnail_path = result.get('thumbnail_path', '')  # This is for display
             similarity = result.get('similarity', 0)
             outlet_name = result.get('outlet_name', 'Unknown')
             filename = result.get('filename', os.path.basename(file_path) if file_path else 'Unknown')
@@ -135,18 +135,21 @@ class OptimizedSearchResultsWidget:
             if not (file_path or original_path or thumbnail_path):
                 continue
             
-            # Create item dengan placeholder
+            # Create item with placeholder
             item = QListWidgetItem()
             display_name = self.parent.smart_truncate_filename(filename, max_chars=14)
             similarity_percent = similarity * 100
             item.setText(f"{display_name}\n{similarity_percent:.0f}% match")
-            
-            # Store data
+         
+            # Store data properly
             item.setData(Qt.UserRole, filename)
             item.setData(Qt.UserRole + 1, "search_result")
-            item.setData(Qt.UserRole + 2, original_path or file_path)
+            item.setData(Qt.UserRole + 2, original_path or file_path)  # For preview (full resolution)
             item.setData(Qt.UserRole + 3, similarity)
             item.setData(Qt.UserRole + 4, outlet_name)
+            item.setData(Qt.UserRole + 5, thumbnail_path)  # For list display (small)
+            
+            print(f'Item {i}: filename={filename}, original={original_path}, thumbnail={thumbnail_path}')
             
             # Set placeholder icon
             placeholder_icon = self.parent.style().standardIcon(self.parent.style().SP_FileIcon)
@@ -157,20 +160,18 @@ class OptimizedSearchResultsWidget:
             
             self.list_widget.addItem(item)
             
-            # Queue thumbnail loading
+            # FIXED: Queue thumbnail loading using thumbnail_path (not original)
             if thumbnail_path:
                 self.queue_thumbnail_load(thumbnail_path, item, similarity_percent)
         
-        print(f"✅ Added {self.list_widget.count()} items to list widget")  # ✅ DEBUG
-        
-        # Start loading thumbnails
+        print(f"Added {self.list_widget.count()} items to list widget")
         self.process_thumbnail_queue()
     
     def queue_thumbnail_load(self, thumbnail_url, item, similarity_percent):
-        """Queue thumbnail untuk loading"""
+        """Queue thumbnail for loading"""
         if thumbnail_url not in self.thumbnail_cache and thumbnail_url not in self.currently_loading:
             self.loading_queue.append({
-                'url': thumbnail_url,
+                'url': thumbnail_url,  # This should be thumbnail URL
                 'item': item,
                 'similarity': similarity_percent
             })
@@ -182,15 +183,13 @@ class OptimizedSearchResultsWidget:
             url = task['url']
             
             if url in self.thumbnail_cache:
-                # Use cached thumbnail
                 self.apply_cached_thumbnail(task['item'], url, task['similarity'])
             else:
-                # Start download
                 self.currently_loading.add(url)
                 self.thumbnail_loader.add_task(url, task['item'], task['similarity'])
     
     def apply_cached_thumbnail(self, item, url, similarity_percent):
-        """Apply cached thumbnail ke item"""
+        """Apply cached thumbnail to item"""
         if url in self.thumbnail_cache:
             pixmap = self.thumbnail_cache[url]
             self.apply_thumbnail_with_overlay(item, pixmap, similarity_percent)
@@ -200,24 +199,21 @@ class OptimizedSearchResultsWidget:
         self.currently_loading.discard(url)
         
         if not pixmap.isNull():
-            # Cache the result
             self.thumbnail_cache[url] = pixmap
-            # Apply to item
             self.apply_thumbnail_with_overlay(item, pixmap, similarity_percent)
-            print(f"✅ Thumbnail loaded: {os.path.basename(url)}")
+            print(f"Thumbnail loaded: {os.path.basename(url)}")
         else:
-            print(f"❌ Thumbnail failed: {os.path.basename(url)}")
+            print(f"Thumbnail failed: {os.path.basename(url)}")
         
         # Process next in queue
         QTimer.singleShot(100, self.process_thumbnail_queue)
     
     def apply_thumbnail_with_overlay(self, item, pixmap, similarity_percent):
+        """Apply thumbnail with similarity overlay"""
         import sip
-        """Apply thumbnail dengan similarity overlay"""
         try:
-            # Skip jika item sudah None atau dihapus
             if item is None or sip.isdeleted(item):
-                print("⚠️ Item sudah dihapus, skip setIcon()")
+                print("Item deleted, skip setIcon()")
                 return
 
             # Scale to standard size
@@ -240,25 +236,23 @@ class OptimizedSearchResultsWidget:
             font.setBold(True)
             painter.setFont(font)
             painter.drawText(scaled_pixmap.width() - 30, 5, 25, 25,
-                            Qt.AlignCenter, f"{similarity_percent:.0f}")
+                           Qt.AlignCenter, f"{similarity_percent:.0f}")
             painter.end()
 
             item.setIcon(QIcon(scaled_pixmap))
 
         except RuntimeError as e:
-            print(f"❌ RuntimeError: {e}")
+            print(f"RuntimeError: {e}")
         except Exception as e:
-            print(f"❌ Error applying overlay: {e}")
+            print(f"Error applying overlay: {e}")
             try:
                 if item and not sip.isdeleted(item):
                     item.setIcon(QIcon(pixmap))
             except:
                 pass
 
-
-
 class ThumbnailLoaderThread(QThread):
-    """Background thread untuk loading thumbnails"""
+    """Background thread untuk loading thumbnails with retry"""
     
     thumbnail_ready = pyqtSignal(str, QPixmap, object, float)  # url, pixmap, item, similarity
     
@@ -274,7 +268,8 @@ class ThumbnailLoaderThread(QThread):
             self.task_queue.append({
                 'url': url,
                 'item': item,
-                'similarity': similarity
+                'similarity': similarity,
+                'attempts': 0  # Track retry attempts
             })
     
     def run(self):
@@ -288,24 +283,45 @@ class ThumbnailLoaderThread(QThread):
                     task = self.task_queue.pop(0)
             
             if task:
-                self.load_thumbnail(task['url'], task['item'], task['similarity'])
+                self.load_thumbnail(task['url'], task['item'], task['similarity'], task['attempts'])
             else:
                 self.msleep(100)  # Sleep 100ms if no tasks
     
-    def load_thumbnail(self, url, item, similarity):
-        """Load single thumbnail"""
+    def load_thumbnail(self, url, item, similarity, attempts):
+        """Load single thumbnail with retry"""
+        max_attempts = 3
+        
         try:
-            response = requests.get(url, timeout=10)
+            # Progressive timeout: 60s, 90s, 120s
+            timeout = 60 + (attempts * 30)
+            response = requests.get(url, timeout=timeout)
+            
             if response.status_code == 200:
                 pixmap = QPixmap()
                 if pixmap.loadFromData(response.content):
                     self.thumbnail_ready.emit(url, pixmap, item, similarity)
                     return
+                    
         except Exception as e:
-            print(f"❌ Thumbnail load error: {e}")
+            print(f"Thumbnail load error (attempt {attempts + 1}/{max_attempts}): {e}")
         
-        # Emit empty pixmap on failure
-        self.thumbnail_ready.emit(url, QPixmap(), item, similarity)
+        # Retry logic
+        if attempts + 1 < max_attempts:
+            print(f"Retrying thumbnail in 2 seconds: {url}")
+            self.msleep(2000)  # Wait 2 seconds before retry
+            
+            # Add retry task back to queue
+            with QMutexLocker(self.mutex):
+                self.task_queue.append({
+                    'url': url,
+                    'item': item,
+                    'similarity': similarity,
+                    'attempts': attempts + 1
+                })
+        else:
+            # Max attempts reached, emit empty pixmap
+            print(f"Max attempts reached for: {url}")
+            self.thumbnail_ready.emit(url, QPixmap(), item, similarity)
     
     def cancel(self):
         """Cancel all tasks"""
@@ -685,6 +701,7 @@ class ExplorerWindow(QMainWindow):
         for i, result in enumerate(results):
             file_path = result.get('file_path', '')
             original_path = result.get('original_path', '')
+            thumbnail_path = result.get('thumbnail_path', '')
             similarity = result.get('similarity', 0)
             outlet_name = result.get('outlet_name', 'Unknown')
             filename = result.get('filename', os.path.basename(file_path) if file_path else f'Image_{i+1}')
@@ -704,7 +721,7 @@ class ExplorerWindow(QMainWindow):
             item.setData(Qt.UserRole + 2, original_path or file_path)
             item.setData(Qt.UserRole + 3, similarity)
             item.setData(Qt.UserRole + 4, outlet_name)
-            
+            item.setData(Qt.UserRole + 5, thumbnail_path) 
             # Default icon
             item.setIcon(self.style().standardIcon(self.style().SP_FileIcon))
             item.setToolTip(f"File: {filename}\nOutlet: {outlet_name}\nSimilarity: {similarity_percent:.1f}%")
@@ -803,72 +820,7 @@ class ExplorerWindow(QMainWindow):
             self.search_tab_widget.addTab(outlet_list, tab_label)
         
         print(f"✅ All tabs created with thumbnail loading in similarity order. Tab count: {self.search_tab_widget.count()}")
-    # def setup_multi_outlet_tabs_optimized(self, outlet_groups):
-    #     """Setup multiple outlet tabs with WORKING thumbnail loading"""
-    #     print(f"🏪 Setting up {len(outlet_groups)} outlet tabs - WITH THUMBNAILS")
-        
-    #     self.file_list.setVisible(False)
-        
-    #     # Create tab widget  
-    #     if not hasattr(self, 'search_tab_widget'):
-    #         self.search_tab_widget = QTabWidget()
-    #         self.search_tab_widget.setStyleSheet("""
-    #             QTabWidget::pane {
-    #                 background-color: white;
-    #                 border: 1px solid #e0e0e0;
-    #                 border-radius: 8px;
-    #             }
-    #             QTabBar::tab {
-    #                 background-color: #f8f9fa;
-    #                 color: #333;
-    #                 padding: 8px 16px;
-    #                 margin-right: 2px;
-    #                 border-top-left-radius: 6px;
-    #                 border-top-right-radius: 6px;
-    #             }
-    #             QTabBar::tab:selected {
-    #                 background-color: #5e72e4;
-    #                 color: white;
-    #             }
-    #         """)
-    #         self.main_layout.insertWidget(3, self.search_tab_widget)
-        
-    #     self.search_tab_widget.clear()
-    #     self.search_tab_widget.setVisible(True)
-        
-    #     # CREATE TABS WITH THUMBNAIL LOADING
-    #     for outlet_name, outlet_results in sorted(outlet_groups.items()):
-    #         print(f"📋 Creating tab: {outlet_name} with {len(outlet_results)} items")
-            
-    #         # Create list widget
-    #         outlet_list = QListWidget()
-    #         outlet_list.setViewMode(QListView.IconMode)
-    #         outlet_list.setIconSize(QPixmap(100, 100).size())
-    #         outlet_list.setResizeMode(QListView.Adjust)
-    #         outlet_list.setSpacing(10)
-    #         outlet_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
-    #         outlet_list.setWordWrap(True)
-    #         outlet_list.setGridSize(QPixmap(140, 140).size())
-    #         outlet_list.setStyleSheet(self.file_list.styleSheet())
-            
-    #         # Use OptimizedSearchResultsWidget for thumbnail loading
-    #         tab_optimizer = OptimizedSearchResultsWidget(outlet_list, self)
-    #         tab_optimizer.populate_results_optimized(outlet_results)
-    #         self.search_optimizers.append(tab_optimizer)
-            
-    #         print(f"✅ Added thumbnail loading for {outlet_name} tab")
-            
-    #         # Connect events
-    #         outlet_list.itemDoubleClicked.connect(self._open_search_result)
-    #         self.connect_selection_handlers(outlet_list)
-            
-    #         # Add tab
-    #         tab_label = f"{outlet_name} ({len(outlet_results)})"
-    #         self.search_tab_widget.addTab(outlet_list, tab_label)
-        
-    #     print(f"✅ All tabs created with thumbnail loading. Tab count: {self.search_tab_widget.count()}")
-
-    
+   
     def on_tab_changed(self, index):
         """Load tab content when tab is selected (lazy loading) - NEW"""
         if index >= 0 and not self.tab_loaded.get(index, True):
@@ -904,7 +856,7 @@ class ExplorerWindow(QMainWindow):
         print(f"✅ Tab loaded: {outlet_name}")
 
     def _open_search_result(self, item):
-        """Open search result item with navigation support - WITH DEBUG"""
+        """FIXED: Open search result item using original URLs for preview"""
         current_list = item.listWidget()
         if not current_list:
             return
@@ -914,23 +866,18 @@ class ExplorerWindow(QMainWindow):
         
         for i in range(current_list.count()):
             list_item = current_list.item(i)
-            url_or_path = list_item.data(Qt.UserRole + 2)
-            filename = list_item.data(Qt.UserRole)  # Should be preserved now
+            
+            # FIXED: Use original_path (UserRole + 2) for preview, not thumbnail
+            original_url = list_item.data(Qt.UserRole + 2)  # Full resolution for preview
+            thumbnail_url = list_item.data(Qt.UserRole + 5)  # Small thumbnail for list
+            filename = list_item.data(Qt.UserRole)
             similarity = list_item.data(Qt.UserRole + 3)
             outlet_name = list_item.data(Qt.UserRole + 4)
             
-            # DEBUG: Print data yang akan dikirim ke preview
-            if i < 3:  # Print first 3 items
-                print(f"🔍 Preview item {i}:")
-                print(f"  - filename from UserRole: '{filename}'")
-                print(f"  - url_or_path: {url_or_path}")
-                print(f"  - similarity: {similarity}")
-                print(f"  - outlet_name: {outlet_name}")
-            
-            if url_or_path:
+            if original_url:  # Use original URL for preview
                 all_items.append({
-                    'url_or_path': url_or_path,
-                    'filename': filename,  # Should be correct now
+                    'url_or_path': thumbnail_url,  
+                    'filename': filename,
                     'similarity': similarity,
                     'outlet_name': outlet_name,
                     'index': i
@@ -940,18 +887,16 @@ class ExplorerWindow(QMainWindow):
                     current_index = len(all_items) - 1
         
         if not all_items:
-            self.log_with_timestamp("❌ No items available for preview")
+            self.log_with_timestamp("No items available for preview")
             return
             
-        # DEBUG: Print final data untuk current item
+        # Debug current item
         current_item = all_items[current_index]
-        print(f"🎯 Opening preview for:")
-        print(f"  - filename: '{current_item['filename']}'")
-        print(f"  - url_or_path: {current_item['url_or_path']}")
         
-        self.log_with_timestamp(f"👁️ Opening preview: {current_item['filename']} ({current_index + 1} of {len(all_items)})")
         
-        # Open preview dengan data yang sudah diperbaiki
+        self.log_with_timestamp(f"Opening preview: {current_item['filename']} ({current_index + 1} of {len(all_items)})")
+        
+        # Open preview with high-resolution images
         self.open_enhanced_preview(all_items, current_index)
 
     def open_enhanced_preview(self, items_data, start_index=0):

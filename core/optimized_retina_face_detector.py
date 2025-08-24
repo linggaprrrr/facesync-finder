@@ -38,7 +38,7 @@ class OptimizedRetinaFaceDetector:
             new_w = int(original_w * scale)
             new_h = int(original_h * scale)
             
-            logger.info(f"🔄 Resizing: {original_w}x{original_h} -> {new_w}x{new_h} (scale={scale:.3f})")
+            # logger.info(f"🔄 Resizing: {original_w}x{original_h} -> {new_w}x{new_h} (scale={scale:.3f})")
             
             resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
             
