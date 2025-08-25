@@ -856,7 +856,11 @@ class ExplorerWindow(QMainWindow):
         print(f"✅ Tab loaded: {outlet_name}")
 
     def _open_search_result(self, item):
-        """FIXED: Open search result item using original URLs for preview"""
+        """Open search result - CHECK GLOBAL STATE FIRST"""
+        
+        # RESET global state when user clicks to open new preview
+        NavigationPreviewDialog.reset_global_state()
+        
         current_list = item.listWidget()
         if not current_list:
             return
@@ -867,16 +871,17 @@ class ExplorerWindow(QMainWindow):
         for i in range(current_list.count()):
             list_item = current_list.item(i)
             
-            # FIXED: Use original_path (UserRole + 2) for preview, not thumbnail
-            original_url = list_item.data(Qt.UserRole + 2)  # Full resolution for preview
-            thumbnail_url = list_item.data(Qt.UserRole + 5)  # Small thumbnail for list
+            # Get both URLs
+            original_url = list_item.data(Qt.UserRole + 2)  # For download
+            thumbnail_url = list_item.data(Qt.UserRole + 5)  # For preview
             filename = list_item.data(Qt.UserRole)
             similarity = list_item.data(Qt.UserRole + 3)
             outlet_name = list_item.data(Qt.UserRole + 4)
             
-            if original_url:  # Use original URL for preview
+            if thumbnail_url or original_url:
                 all_items.append({
-                    'url_or_path': thumbnail_url,  
+                    'thumbnail': thumbnail_url,  # For display
+                    'original': original_url,    # For download
                     'filename': filename,
                     'similarity': similarity,
                     'outlet_name': outlet_name,
@@ -890,13 +895,10 @@ class ExplorerWindow(QMainWindow):
             self.log_with_timestamp("No items available for preview")
             return
             
-        # Debug current item
         current_item = all_items[current_index]
-        
-        
         self.log_with_timestamp(f"Opening preview: {current_item['filename']} ({current_index + 1} of {len(all_items)})")
         
-        # Open preview with high-resolution images
+        # Open preview
         self.open_enhanced_preview(all_items, current_index)
 
     def open_enhanced_preview(self, items_data, start_index=0):
@@ -931,13 +933,13 @@ class ExplorerWindow(QMainWindow):
             download_tasks = []
             for item_info in selected_items_data:
                 item_data = item_info['data']
-                url_or_path = item_data.get('url_or_path', '')
+                url = item_data.get('original', '')
                 filename = item_data.get('filename', f"image_{item_info['index']}")
                 outlet_name = item_data.get('outlet_name', 'unknown_outlet')
                 
-                if url_or_path:
+                if url:
                     download_tasks.append({
-                        'url': url_or_path,
+                        'url': url,
                         'filename': filename,
                         'outlet_name': outlet_name
                     })

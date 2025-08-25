@@ -316,18 +316,18 @@ class EnhancedImagePreviewDialog(QDialog):
             return
             
         current_item = self.items_data[self.current_index]
-        url_or_path = current_item.get('url_or_path', '')
+        thumbnail = current_item.get('thumbnail', '')
         
         self.update_ui_info()
         
-        if not url_or_path:
+        if not thumbnail:
             self.image_label.setText("❌ No image path available")
             return
             
-        if url_or_path.startswith(('http://', 'https://')):
-            self.load_image_from_url(url_or_path)
-        elif os.path.exists(url_or_path):
-            self.load_image_from_file(url_or_path)
+        if thumbnail.startswith(('http://', 'https://')):
+            self.load_image_from_url(thumbnail)
+        elif os.path.exists(thumbnail):
+            self.load_image_from_file(thumbnail)
         else:
             self.image_label.setText("❌ Image file not found")
             

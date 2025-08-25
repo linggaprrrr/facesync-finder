@@ -1,3 +1,5 @@
+# ui/navigation_preview.py - SIMPLE SOLUTION
+
 import os
 import logging
 import requests
@@ -13,7 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 class NavigationPreviewDialog(QDialog):
-    """Fixed preview dialog with proper cleanup, working download, and image rotation fix"""
+    """Simple preview dialog with global close state"""
+    
+    # GLOBAL CLASS VARIABLE - shared across all instances
+    _global_close_requested = False
     
     # Signals untuk communicate back ke parent
     selection_changed = pyqtSignal(int, bool)  # index, is_selected
@@ -21,6 +26,13 @@ class NavigationPreviewDialog(QDialog):
     
     def __init__(self, items_data, start_index=0, parent=None):
         super().__init__(parent)
+        
+        # CHECK GLOBAL STATE FIRST
+        if NavigationPreviewDialog._global_close_requested:
+            print("BLOCKED: Preview blocked by global close state")
+            self.reject()  # Close immediately
+            return
+        
         self.items_data = items_data
         self.current_index = start_index
         self.temp_files = []
@@ -28,9 +40,12 @@ class NavigationPreviewDialog(QDialog):
         # Track selection state untuk setiap item
         self.selection_state = {i: False for i in range(len(items_data))}
         
-        # TAMBAH: Flag untuk prevent multiple operations
+        # Simple flags
         self.is_loading = False
         self.is_closing = False
+        
+        # Reset global state when new preview opens successfully
+        NavigationPreviewDialog._global_close_requested = False
         
         self.setWindowTitle("Image Preview")
         self.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMaximizeButtonHint)
@@ -40,8 +55,20 @@ class NavigationPreviewDialog(QDialog):
         self.setup_shortcuts()
         self.load_current_image()
     
+    @classmethod
+    def reset_global_state(cls):
+        """Reset global close state - call this when main window opens new search"""
+        cls._global_close_requested = False
+        print("RESET: Global preview state reset")
+    
+    @classmethod
+    def set_global_close_state(cls):
+        """Set global close state - prevent any new previews"""
+        cls._global_close_requested = True
+        print("BLOCKED: Global preview state set to CLOSED")
+    
     def init_ui(self):
-        """Initialize UI"""
+        """Initialize UI - same as before"""
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -209,8 +236,9 @@ class NavigationPreviewDialog(QDialog):
         self.download_selected_btn.clicked.connect(self.download_selected)
         self.download_selected_btn.setEnabled(False)
         
-        close_btn = QPushButton("Close")
-        close_btn.setStyleSheet("""
+        # CLOSE BUTTON - SET GLOBAL STATE
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setStyleSheet("""
             QPushButton {
                 background-color: #dc3545;
                 color: white;
@@ -225,20 +253,19 @@ class NavigationPreviewDialog(QDialog):
                 background-color: #c82333;
             }
         """)
-        close_btn.clicked.connect(self.safe_close)
+        self.close_btn.clicked.connect(self.force_close)
         
         bottom_layout.addWidget(self.outlet_label)
         bottom_layout.addWidget(self.selection_summary_label)        
         bottom_layout.addStretch()
         bottom_layout.addWidget(self.select_checkbox)
         bottom_layout.addWidget(self.download_selected_btn)
-        bottom_layout.addWidget(close_btn)
+        bottom_layout.addWidget(self.close_btn)
         layout.addLayout(bottom_layout)
     
     def setup_shortcuts(self):
-        """Setup keyboard shortcuts dengan proper cleanup"""
+        """Setup keyboard shortcuts"""
         try:
-            # Store shortcuts untuk cleanup nanti
             self.shortcuts = []
             
             # Arrow keys
@@ -252,7 +279,7 @@ class NavigationPreviewDialog(QDialog):
             
             # Escape to close
             escape_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), self)
-            escape_shortcut.activated.connect(self.safe_close)
+            escape_shortcut.activated.connect(self.force_close)
             self.shortcuts.append(escape_shortcut)
             
             # Space for select/deselect
@@ -277,38 +304,47 @@ class NavigationPreviewDialog(QDialog):
                     pass
             self.shortcuts.clear()
     
-    # SAFE WRAPPER METHODS - Prevent operations during loading/closing
     def safe_previous_image(self):
         """Safe wrapper untuk previous_image"""
-        if self.is_loading or self.is_closing:
-            print("⚠️ Operation blocked - loading or closing in progress")
+        if self.is_loading or self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
         self.previous_image()
     
     def safe_next_image(self):
         """Safe wrapper untuk next_image"""
-        if self.is_loading or self.is_closing:
-            print("⚠️ Operation blocked - loading or closing in progress")
+        if self.is_loading or self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
         self.next_image()
     
     def safe_selection_changed(self, state):
         """Safe wrapper untuk selection changed"""
-        if self.is_loading or self.is_closing:
-            print("⚠️ Selection change blocked - loading or closing in progress")
+        if self.is_loading or self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
         self.on_selection_changed(state)
     
-    def safe_close(self):
-        """Safe wrapper untuk close"""
-        if self.is_closing:
-            print("⚠️ Close already in progress")
-            return
-        self.close()
+    def force_close(self):
+        """SIMPLE: Set global state and close"""
+        print("CLOSE: Setting global close state and closing dialog")
+        
+        # SET GLOBAL STATE FIRST
+        NavigationPreviewDialog.set_global_close_state()
+        
+        # Set local state
+        self.is_closing = True
+        
+        # Disable all controls
+        self.prev_btn.setEnabled(False)
+        self.next_btn.setEnabled(False)
+        self.select_checkbox.setEnabled(False)
+        self.download_selected_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        
+        # Close immediately
+        self.reject()
     
     def toggle_current_selection(self):
         """Toggle selection of current image with spacebar"""
-        if self.is_loading or self.is_closing:
+        if self.is_loading or self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
         
         current_state = self.select_checkbox.isChecked()
@@ -316,7 +352,7 @@ class NavigationPreviewDialog(QDialog):
     
     def update_ui_info(self):
         """Update UI info dengan safety checks"""
-        if self.is_closing or not self.items_data:
+        if self.is_closing or NavigationPreviewDialog._global_close_requested or not self.items_data:
             return
             
         try:
@@ -328,13 +364,13 @@ class NavigationPreviewDialog(QDialog):
             
             # Color coding
             if similarity_percent >= 80:
-                color = "#28a745"  # Green
+                color = "#28a745"
             elif similarity_percent >= 60:
-                color = "#ffc107"  # Yellow
+                color = "#ffc107"
             elif similarity_percent >= 40:
-                color = "#fd7e14"  # Orange
+                color = "#fd7e14"
             else:
-                color = "#dc3545"  # Red
+                color = "#dc3545"
                 
             self.similarity_label.setStyleSheet(f"""
                 QLabel {{
@@ -357,7 +393,7 @@ class NavigationPreviewDialog(QDialog):
             self.prev_btn.setEnabled(self.current_index > 0 and not self.is_closing)
             self.next_btn.setEnabled(self.current_index < len(self.items_data) - 1 and not self.is_closing)
             
-            # Update selection checkbox - BLOCK SIGNALS saat update
+            # Update selection checkbox
             self.select_checkbox.blockSignals(True)
             self.select_checkbox.setChecked(self.selection_state.get(self.current_index, False))
             self.select_checkbox.blockSignals(False)
@@ -384,11 +420,11 @@ class NavigationPreviewDialog(QDialog):
     
     def on_selection_changed(self, state):
         """Handle checkbox selection change"""
-        if self.is_closing:
+        if self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
             
         try:
-            is_selected = state == 2  # Qt.Checked = 2
+            is_selected = state == 2
             self.selection_state[self.current_index] = is_selected
             
             # Emit signal untuk parent
@@ -402,281 +438,119 @@ class NavigationPreviewDialog(QDialog):
             print(f"❌ Error in selection changed: {e}")
     
     def load_current_image(self):
-        """Load current image dengan safety checks"""
-        if self.is_closing or not self.items_data:
+        """Load current image - SIMPLE VERSION"""
+        if self.is_closing or NavigationPreviewDialog._global_close_requested or not self.items_data:
             return
         
-        # Set loading flag
         self.is_loading = True
         
         try:
-            # Clear previous image IMMEDIATELY
+            # Clear previous image
             self.image_label.clear()
-            self.image_label.setText("📥 Loading image...\n\nPlease wait...")
-            
-            # Force UI update
+            self.image_label.setText("📥 Loading...")
             QApplication.processEvents()
             
-            # Update UI info
+            # Check again after UI update
+            if NavigationPreviewDialog._global_close_requested:
+                return
+            
             self.update_ui_info()
             
             current_item = self.items_data[self.current_index]
-            url_or_path = current_item.get('url_or_path', '')
             
-            if not url_or_path:
+            # Use thumbnail for display
+            thumbnail_url = current_item.get('thumbnail', '')
+            
+            if not thumbnail_url:
+                thumbnail_url = current_item.get('original', '')
+            
+            if not thumbnail_url:
                 self.image_label.setText("❌ No image available")
                 return
                 
-            if url_or_path.startswith(('http://', 'https://')):
-                self.load_image_from_url(url_or_path)
-            elif os.path.exists(url_or_path):
-                self.load_image_from_file(url_or_path)
+            if thumbnail_url.startswith(('http://', 'https://')):
+                self.load_image_from_url(thumbnail_url)
+            elif os.path.exists(thumbnail_url):
+                self.load_image_from_file(thumbnail_url)
             else:
                 self.image_label.setText("❌ Image not found")
                 
         except Exception as e:
             print(f"❌ Error loading current image: {e}")
-            self.image_label.setText(f"❌ Error loading image\n\n{str(e)}")
+            if not NavigationPreviewDialog._global_close_requested:
+                self.image_label.setText(f"❌ Error: {str(e)}")
         finally:
-            # Always clear loading flag dan update UI
             self.is_loading = False
-            self.update_ui_info()  # Update button states
+            if not NavigationPreviewDialog._global_close_requested:
+                self.update_ui_info()
     
-    def fix_image_orientation(self, image_path_or_data, is_url=False):
-        """
-        ✅ WORKING: Fix EXIF orientation - tested and confirmed working
-        Returns QPixmap with correct orientation or None if failed
-        """
-        try:
-            from PIL import Image
-            import numpy as np
-            from io import BytesIO
-            
-            print(f"🔧 Starting orientation fix (is_url: {is_url})")
-            
-            # Load image based on type
-            if is_url:
-                pil_image = Image.open(BytesIO(image_path_or_data))
-                print(f"🌐 Loaded image from URL data: {len(image_path_or_data)} bytes")
-            else:
-                pil_image = Image.open(image_path_or_data)
-                print(f"📁 Loaded image from file: {image_path_or_data}")
-            
-            print(f"🖼️ Original image size: {pil_image.size}, mode: {pil_image.mode}")
-            
-            # Get EXIF orientation
-            orientation = None
-            try:
-                # Try newer method first
-                exif_data = pil_image.getexif()
-                orientation = exif_data.get(274)  # 274 = orientation tag
-                if orientation:
-                    print(f"🧭 EXIF orientation found via getexif(): {orientation}")
-            except:
-                pass
-            
-            # Try older method if newer failed
-            if not orientation:
-                try:
-                    exif_data = pil_image._getexif()
-                    if exif_data:
-                        orientation = exif_data.get(274)
-                        if orientation:
-                            print(f"🧭 EXIF orientation found via _getexif(): {orientation}")
-                except:
-                    pass
-            
-            # Apply rotation based on EXIF orientation
-            rotation_applied = False
-            if orientation:
-                if orientation == 1:
-                    print("✅ No rotation needed (orientation = 1)")
-                elif orientation == 2:
-                    pil_image = pil_image.transpose(Image.FLIP_LEFT_RIGHT)
-                    rotation_applied = True
-                    print("🔄 Applied horizontal flip (orientation = 2)")
-                elif orientation == 3:
-                    pil_image = pil_image.rotate(180, expand=True)
-                    rotation_applied = True
-                    print("🔄 Applied 180° rotation (orientation = 3)")
-                elif orientation == 4:
-                    pil_image = pil_image.transpose(Image.FLIP_TOP_BOTTOM)
-                    rotation_applied = True
-                    print("🔄 Applied vertical flip (orientation = 4)")
-                elif orientation == 5:
-                    pil_image = pil_image.transpose(Image.FLIP_LEFT_RIGHT)
-                    pil_image = pil_image.rotate(270, expand=True)
-                    rotation_applied = True
-                    print("🔄 Applied horizontal flip + 270° rotation (orientation = 5)")
-                elif orientation == 6:
-                    pil_image = pil_image.rotate(270, expand=True)
-                    rotation_applied = True
-                    print("🔄 Applied 270° rotation (orientation = 6)")
-                elif orientation == 7:
-                    pil_image = pil_image.transpose(Image.FLIP_LEFT_RIGHT)
-                    pil_image = pil_image.rotate(90, expand=True)
-                    rotation_applied = True
-                    print("🔄 Applied horizontal flip + 90° rotation (orientation = 7)")
-                elif orientation == 8:
-                    # ✅ THIS IS YOUR CASE!
-                    pil_image = pil_image.rotate(90, expand=True)
-                    rotation_applied = True
-                    print("🔄 ✨ Applied 90° rotation (orientation = 8) - FIXED!")
-                else:
-                    print(f"❓ Unknown orientation: {orientation}")
-            else:
-                print("✅ No EXIF orientation found")
-            
-            # Convert PIL to QPixmap
-            if pil_image.mode != 'RGB':
-                pil_image = pil_image.convert('RGB')
-                print("🔄 Converted to RGB")
-            
-            # Convert to numpy array
-            np_array = np.array(pil_image)
-            height, width, channels = np_array.shape
-            bytes_per_line = channels * width
-            
-            # Create QImage
-            q_image = QImage(np_array.data, width, height, bytes_per_line, QImage.Format_RGB888)
-            
-            # Convert to QPixmap
-            pixmap = QPixmap.fromImage(q_image)
-            
-            if rotation_applied:
-                print(f"✅ ✨ ORIENTATION FIXED! New size: {pixmap.width()}x{pixmap.height()}")
-            else:
-                print(f"✅ Image loaded: {pixmap.width()}x{pixmap.height()}")
-            
-            return pixmap if not pixmap.isNull() else None
-            
-        except ImportError:
-            print("❌ Missing Pillow or numpy. Install with: pip install Pillow numpy")
-            return None
-        except Exception as e:
-            print(f"❌ Error fixing orientation: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
-
     def load_image_from_url(self, url):
-        """✅ Updated load from URL with working orientation fix"""
-        if self.is_closing:
+        """Simple URL loading"""
+        if self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
             
         try:
-            print(f"🌐 Downloading image from URL...")
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, timeout=10)
+            
+            # Check state after network call
+            if NavigationPreviewDialog._global_close_requested:
+                return
+                
             if response.status_code == 200:
-                print(f"✅ Downloaded {len(response.content)} bytes")
+                pixmap = QPixmap()
+                pixmap.loadFromData(response.content)
                 
-                # ✅ ALWAYS fix orientation first
-                pixmap = self.fix_image_orientation(response.content, is_url=True)
-                
-                if pixmap and not pixmap.isNull():
-                    print("✅ ✨ Using orientation-fixed image")
+                if not pixmap.isNull() and not NavigationPreviewDialog._global_close_requested:
                     self.display_pixmap(pixmap)
-                else:
-                    print("⚠️ Orientation fix failed, using fallback")
-                    # Fallback to temp file
-                    with tempfile.NamedTemporaryFile(delete=False, suffix='.jpg') as tmp_file:
-                        tmp_file.write(response.content)
-                        temp_path = tmp_file.name
-                    
-                    self.temp_files.append(temp_path)
-                    
-                    # Try orientation fix on file
-                    pixmap = self.fix_image_orientation(temp_path, is_url=False)
-                    if pixmap and not pixmap.isNull():
-                        self.display_pixmap(pixmap)
-                    else:
-                        # Last resort - basic loader
-                        self.load_image_from_file_fallback(temp_path)
             else:
-                self.image_label.setText(f"❌ Download failed\n\nStatus: {response.status_code}")
+                if not NavigationPreviewDialog._global_close_requested:
+                    self.image_label.setText(f"❌ Download failed: {response.status_code}")
+                    
         except Exception as e:
-            if not self.is_closing:
-                self.image_label.setText(f"❌ Download error\n\n{str(e)}")
-                print(f"❌ URL download error: {e}")
-        finally:
-            self.is_loading = False
-            if not self.is_closing:
-                self.update_ui_info()
+            if not NavigationPreviewDialog._global_close_requested:
+                self.image_label.setText(f"❌ Download error: {str(e)}")
 
     def load_image_from_file(self, file_path):
-        """✅ Updated load from file with working orientation fix"""
-        if self.is_closing:
+        """Simple file loading"""
+        if self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
             
-        try:
-            print(f"📁 Loading image from file: {os.path.basename(file_path)}")
-            
-            # ✅ ALWAYS fix orientation first  
-            pixmap = self.fix_image_orientation(file_path, is_url=False)
-            
-            if pixmap and not pixmap.isNull():
-                print("✅ ✨ Using orientation-fixed image")
-                self.display_pixmap(pixmap)
-            else:
-                print("⚠️ Orientation fix failed, using fallback")
-                self.load_image_from_file_fallback(file_path)
-                
-        except Exception as e:
-            if not self.is_closing:
-                self.image_label.setText(f"❌ Error loading image\n\n{str(e)}")
-                print(f"❌ File load error: {e}")
-        finally:
-            self.is_loading = False
-            if not self.is_closing:
-                self.update_ui_info()
-    
-    def load_image_from_file_fallback(self, file_path):
-        """Fallback method without orientation fix"""
         try:
             pixmap = QPixmap(file_path)
-            if pixmap.isNull():
-                self.image_label.setText("❌ Invalid image file")
-                return
-            
-            print("⚠️ Using fallback loading without orientation fix")
-            self.display_pixmap(pixmap)
-            
+            if not pixmap.isNull() and not NavigationPreviewDialog._global_close_requested:
+                self.display_pixmap(pixmap)
+            else:
+                if not NavigationPreviewDialog._global_close_requested:
+                    self.image_label.setText("❌ Invalid image")
         except Exception as e:
-            if not self.is_closing:
-                self.image_label.setText(f"❌ Error loading image\n\n{str(e)}")
+            if not NavigationPreviewDialog._global_close_requested:
+                self.image_label.setText(f"❌ Error: {str(e)}")
     
     def display_pixmap(self, pixmap):
-        """Display pixmap with proper scaling and dialog resizing"""
-        if self.is_closing or pixmap.isNull():
+        """Display pixmap with scaling"""
+        if self.is_closing or NavigationPreviewDialog._global_close_requested or pixmap.isNull():
             return
             
         try:
-            # Get screen size for scaling
+            # Get screen size
             screen = QApplication.primaryScreen()
             screen_rect = screen.availableGeometry()
             max_width = int(screen_rect.width() * 0.7)
             max_height = int(screen_rect.height() * 0.6)
             
-            # Scale image if needed
+            # Scale if needed
             if pixmap.width() > max_width or pixmap.height() > max_height:
-                scaled_pixmap = pixmap.scaled(max_width, max_height, 
-                                            Qt.KeepAspectRatio, 
-                                            Qt.SmoothTransformation)
-                print(f"🔄 Scaled image: {pixmap.width()}x{pixmap.height()} → {scaled_pixmap.width()}x{scaled_pixmap.height()}")
+                scaled_pixmap = pixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             else:
                 scaled_pixmap = pixmap
-                print(f"✅ Image fits screen: {pixmap.width()}x{pixmap.height()}")
             
-            # IMPORTANT: Check if still not closing before setting pixmap
-            if not self.is_closing:
+            # Final check before display
+            if not NavigationPreviewDialog._global_close_requested:
                 self.image_label.setPixmap(scaled_pixmap)
                 
-                # Adjust dialog size
-                dialog_width = scaled_pixmap.width() + 80
-                dialog_height = scaled_pixmap.height() + 200
-                
-                dialog_width = min(dialog_width, screen_rect.width() - 100)
-                dialog_height = min(dialog_height, screen_rect.height() - 100)
+                # Resize dialog
+                dialog_width = min(scaled_pixmap.width() + 80, screen_rect.width() - 100)
+                dialog_height = min(scaled_pixmap.height() + 200, screen_rect.height() - 100)
                 
                 self.resize(dialog_width, dialog_height)
                 
@@ -684,114 +558,88 @@ class NavigationPreviewDialog(QDialog):
                 x = (screen_rect.width() - dialog_width) // 2
                 y = (screen_rect.height() - dialog_height) // 2
                 self.move(x, y)
-                
-                print(f"✅ Image displayed and dialog resized to {dialog_width}x{dialog_height}")
             
         except Exception as e:
-            if not self.is_closing:
-                self.image_label.setText(f"❌ Error displaying image\n\n{str(e)}")
-                print(f"❌ Display error: {e}")
+            if not NavigationPreviewDialog._global_close_requested:
+                self.image_label.setText(f"❌ Display error: {str(e)}")
     
     def previous_image(self):
         """Go to previous image"""
-        if self.is_loading or self.is_closing:
+        if self.is_loading or self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
             
-        print(f"⬅️ Previous clicked - current: {self.current_index}")
         if self.current_index > 0:
             self.current_index -= 1
             self.load_current_image()
-            print(f"✅ Moved to index: {self.current_index}")
-        else:
-            print("⚠️ Already at first image")
     
     def next_image(self):
         """Go to next image"""
-        if self.is_loading or self.is_closing:
+        if self.is_loading or self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
             
-        print(f"➡️ Next clicked - current: {self.current_index}")
         if self.current_index < len(self.items_data) - 1:
             self.current_index += 1
             self.load_current_image()
-            print(f"✅ Moved to index: {self.current_index}")
-        else:
-            print("⚠️ Already at last image")
     
     def get_selected_items(self):
-        """Get list of selected items with their data"""
+        """Get selected items for download"""
         selected_items = []
         for index, is_selected in self.selection_state.items():
             if is_selected and index < len(self.items_data):
+                item_data = self.items_data[index].copy()
+                
+                # Use original URL for download
+                original_url = item_data.get('original', '')
+                if original_url:
+                    item_data['url_or_path'] = original_url
+                else:
+                    thumbnail_url = item_data.get('thumbnail', '')
+                    item_data['url_or_path'] = thumbnail_url
+                
                 selected_items.append({
                     'index': index,
-                    'data': self.items_data[index]
+                    'data': item_data
                 })
         return selected_items
     
     def download_selected(self):
-        """Download selected images - WORKING IMPLEMENTATION"""
-        if self.is_closing:
+        """Download selected images"""
+        if self.is_closing or NavigationPreviewDialog._global_close_requested:
             return
             
         try:
             selected_items = self.get_selected_items()
             
             if not selected_items:
-                QMessageBox.information(self, "Download", "No images selected for download.")
+                QMessageBox.information(self, "Download", "No images selected.")
                 return
             
-            print(f"📥 Preview download requested: {len(selected_items)} items")
-            
-            # Debug: Print selected items
-            for i, item in enumerate(selected_items):
-                data = item['data']
-                print(f"  {i+1}. {data.get('filename', 'unknown')} from {data.get('outlet_name', 'unknown')}")
-            
-            # Emit signal to parent dengan selected items data
+            # Emit signal to parent
             self.download_requested.emit(selected_items)
             
         except Exception as e:
-            print(f"❌ Error in download_selected: {e}")
-            QMessageBox.critical(self, "Download Error", f"Failed to start download:\n{str(e)}")
+            QMessageBox.critical(self, "Download Error", f"Failed: {str(e)}")
     
     def closeEvent(self, event):
-        """Clean up dengan proper order"""
-        print("🔄 Starting cleanup process...")
+        """Simple cleanup"""
+        print("CLEANUP: Dialog closing")
         
-        # Set closing flag to prevent new operations
+        # Set global close state
+        NavigationPreviewDialog.set_global_close_state()
+        
         self.is_closing = True
-        
-        # Disable all controls immediately
-        self.prev_btn.setEnabled(False)
-        self.next_btn.setEnabled(False)
-        self.select_checkbox.setEnabled(False)
-        self.download_selected_btn.setEnabled(False)
-        
-        # Clear image immediately to prevent display issues
-        self.image_label.clear()
-        self.image_label.setText("Closing...")
-        
-        # Force process events to ensure UI updates
-        QApplication.processEvents()
         
         # Cleanup shortcuts
         self.cleanup_shortcuts()
         
-        # Clean up temp files
-        print(f"🧹 Cleaning up {len(self.temp_files)} temp files")
-        for temp_file in self.temp_files:
-            try:
-                if os.path.exists(temp_file):
-                    os.unlink(temp_file)
-                    print(f"🗑️ Deleted: {temp_file}")
-            except Exception as e:
-                print(f"❌ Failed to delete {temp_file}: {e}")
+        # Clean temp files
+        if hasattr(self, 'temp_files'):
+            for temp_file in self.temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                except:
+                    pass
         
-        # Clear all references
-        self.temp_files.clear()
-        self.items_data.clear()
-        self.selection_state.clear()
-        
-        print("✅ Cleanup completed")
-        super().closeEvent(event)
+        # Accept event
+        event.accept()
