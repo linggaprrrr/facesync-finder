@@ -1,24 +1,10 @@
 import sys
 import os
-import logging
-from PyQt5.QtGui import QIcon
+from PyQt5.QtGui import QIcon, QPixmap, QPainter, QFont
 from PyQt5.QtWidgets import (
-    QApplication, QMessageBox, QDialog
+    QApplication, QMessageBox, QSplashScreen
 )
 from PyQt5.QtCore import Qt, QTimer
-
-from config.config_manager import ConfigManager
-from ui.explorer_window import ExplorerWindow
-
-# import requests
-# from PIL import Image
-# try:
-#     from PIL.ExifTags import ORIENTATION
-# except ImportError:
-#     ORIENTATION = 274  # Standard EXIF orientation tag number
-
-# from io import BytesIO
-
 
 def fix_pyinstaller_paths():
     """Fix import paths for PyInstaller"""
@@ -32,244 +18,364 @@ def fix_pyinstaller_paths():
             subdir_path = os.path.join(bundle_dir, subdir)
             if os.path.exists(subdir_path) and subdir_path not in sys.path:
                 sys.path.insert(0, subdir_path)
-        
-        print(f"🔧 PyInstaller paths fixed: {bundle_dir}")
-    else:
-        print("🐍 Running in development mode")
+    
+    return getattr(sys, 'frozen', False)
 
-# CALL THIS FIRST!
-fix_pyinstaller_paths()
-
-class MainApplication:
-    """Main application controller dengan windowed mode fixes"""
+class FastMainApplication:
+    """Fast startup dengan safe splash screen - no threading"""
     
     def __init__(self):
-        # Setup windowed mode logging
-        self.setup_windowed_logging()
+        fix_pyinstaller_paths()
         
-        # Setup QApplication dengan proper attributes untuk windowed mode
-        self.setup_qapplication()
+        # macOS specific setup
+        if sys.platform == 'darwin':
+            os.environ['QT_MAC_WANTS_LAYER'] = '1'
         
-        # Original initialization
-        self.config_manager = ConfigManager()
+        # Minimal QApplication setup
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+        
+        self.app = QApplication(sys.argv)
+        self.app.setApplicationName("FaceSync Finder")
+        
+        # Set application icon
+        self.set_app_icon()
+    
+    def set_app_icon(self):
+        """Set application icon from assets"""
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "assets", "ownize_logo.ico")
+            if os.path.exists(icon_path):
+                self.app.setWindowIcon(QIcon(icon_path))
+                return True
+            else:
+                print(f"Icon not found: {icon_path}")
+                return False
+        except Exception as e:
+            print(f"Failed to set icon: {e}")
+            return False
+        
+        # Set application icon
+        self.set_app_icon()
+        
         self.main_window = None
-        
-        self.logger.info("✅ MainApplication initialized")
+        self.splash = None
+        self.load_timer = None
     
-    def setup_windowed_logging(self):
-        """Setup logging untuk windowed mode"""
+    def set_app_icon(self):
+        """Set application icon from assets"""
         try:
-            # Create log file di Desktop untuk easy access
-            log_file = os.path.expanduser('~/Desktop/FaceSearchApp_Debug.log')
-            
-            logging.basicConfig(
-                level=logging.INFO,
-                format='%(asctime)s - %(levelname)s - %(message)s',
-                handlers=[
-                    logging.FileHandler(log_file),
-                    logging.StreamHandler(sys.stdout)
-                ]
-            )
-            
-            self.logger = logging.getLogger(__name__)
-            self.logger.info("🚀 Windowed mode logging started")
-            self.logger.info(f"📝 Log file: {log_file}")
-            
+            icon_path = os.path.join(os.path.dirname(__file__), "assets", "ownize_logo.ico")
+            if os.path.exists(icon_path):
+                self.app.setWindowIcon(QIcon(icon_path))
+                return True
+            else:
+                print(f"Icon not found: {icon_path}")
+                return False
         except Exception as e:
-            print(f"❌ Logging setup error: {e}")
-            self.logger = logging.getLogger(__name__)
+            print(f"Failed to set icon: {e}")
+            return False
     
-    def setup_qapplication(self):
-        """Setup QApplication dengan windowed mode fixes"""
+    def create_splash_screen(self):
+        """Create splash screen dengan background image dan logo"""
         try:
-            # WINDOWED MODE FIX: Set Qt attributes BEFORE creating QApplication
-            QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
-            QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-            QApplication.setAttribute(Qt.AA_DontShowIconsInMenus, False)
+            # Try to load background splash image first
+            splash_bg_path = os.path.join(os.path.dirname(__file__), "assets", "ownize.png")
+            splash_pixmap = None
             
-            # Create QApplication
-            self.app = QApplication(sys.argv)
+            if os.path.exists(splash_bg_path):
+                try:
+                    splash_pixmap = QPixmap(splash_bg_path)
+                    if splash_pixmap.isNull():
+                        splash_pixmap = None
+                except Exception as e:
+                    print(f"Failed to load splash background: {e}")
+                    splash_pixmap = None
             
-            # Set app properties (your existing code)
-            logo_path = os.path.join(os.path.dirname(__file__), "assets", "ownize_logo.png")
-            if os.path.exists(logo_path):
-                self.app.setWindowIcon(QIcon(logo_path))
+            # Fallback: create custom splash if no background image
+            if splash_pixmap is None:
+                splash_pixmap = QPixmap(400, 250)
+                splash_pixmap.fill(Qt.white)
+                
+                # Draw custom content
+                painter = QPainter(splash_pixmap)
+                try:
+                    # Try to load and draw logo
+                    logo_path = os.path.join(os.path.dirname(__file__), "assets", "ownize_logo.ico")
+                    if os.path.exists(logo_path):
+                        logo = QPixmap(logo_path)
+                        if not logo.isNull():
+                            # Scale logo to fit nicely
+                            scaled_logo = logo.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            # Draw logo at top center
+                            logo_x = (400 - scaled_logo.width()) // 2
+                            painter.drawPixmap(logo_x, 20, scaled_logo)
+                            title_y = 100
+                        else:
+                            title_y = 80
+                    else:
+                        title_y = 80
+                    
+                    # Title
+                    painter.setFont(QFont("Arial", 20, QFont.Bold))
+                    painter.setPen(Qt.black)
+                    painter.drawText(50, title_y, "FaceSync Finder")
+                    
+                    # Version/subtitle
+                    painter.setFont(QFont("Arial", 12))
+                    painter.setPen(Qt.gray)
+                    painter.drawText(50, title_y + 30, "Face Recognition Photo Search")
+                    
+                    # Loading message area
+                    painter.setFont(QFont("Arial", 14))
+                    painter.setPen(Qt.blue)
+                    painter.drawText(50, title_y + 80, "Loading application...")
+                    
+                    # Progress indicator
+                    painter.setPen(Qt.lightGray)
+                    painter.drawRect(50, title_y + 100, 300, 20)
+                    painter.fillRect(52, title_y + 102, 296, 16, Qt.white)
+                    
+                finally:
+                    painter.end()
+            else:
+                # Using background image - scale if needed
+                if splash_pixmap.width() > 500 or splash_pixmap.height() > 350:
+                    splash_pixmap = splash_pixmap.scaled(400, 250, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             
-            # Additional windowed mode properties
-            self.app.setApplicationName("FaceSearchApp")
-            self.app.setApplicationDisplayName("Face Search Application")
-            self.app.setOrganizationName("YourCompany")
+            # Create splash screen
+            self.splash = QSplashScreen(splash_pixmap)
+            self.splash.setWindowFlags(Qt.SplashScreen | Qt.WindowStaysOnTopHint)
             
-            # CRITICAL: Process events untuk proper initialization
+            # Show splash
+            self.splash.show()
+            self.splash.showMessage("Initializing...", Qt.AlignBottom | Qt.AlignCenter, Qt.black)
+            
+            # Process events untuk ensure splash appears
             self.app.processEvents()
             
+            return True
+            
         except Exception as e:
-            print(f"❌ QApplication setup error: {e}")
-            raise e
+            print(f"Splash screen failed: {e}")
+            return False
     
-    def create_main_window_delayed(self):
-        """Create main window dengan delay untuk windowed mode"""
-        try:
-            self.logger.info("📱 Creating main window...")
-            
-            # Import dan create main window
-            from ui.explorer_window import ExplorerWindow
-            
-            self.main_window = ExplorerWindow()
-            
-            # WINDOWED MODE FIX: Set proper window attributes
-            self.main_window.setAttribute(Qt.WA_DeleteOnClose, True)
-            
-            # Show window dengan proper sequence
-            self.main_window.show()
-            self.main_window.raise_()
-            self.main_window.activateWindow()
-            
-            # Process events lagi
-            self.app.processEvents()
-            
-            self.logger.info("✅ Main window created and shown successfully")
-            
-        except Exception as e:
-            self.logger.error(f"❌ Main window creation error: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
-            
-            # Show error dialog jika memungkinkan
+    def update_splash_progress(self, message, progress=None):
+        """Update splash screen message"""
+        if self.splash:
             try:
-                QMessageBox.critical(
-                    None, 
-                    "Application Error", 
-                    f"Failed to create main window:\n{str(e)}\n\nCheck log file for details."
-                )
-            except:
-                print(f"FATAL ERROR: {e}")
-            
-            self.app.quit()
+                self.splash.showMessage(message, Qt.AlignBottom | Qt.AlignCenter, Qt.black)
+                self.app.processEvents()
+                
+                # Optional: Update progress bar
+                if progress is not None:
+                    # Redraw with progress
+                    pixmap = self.splash.pixmap()
+                    painter = QPainter(pixmap)
+                    try:
+                        # Clear progress area
+                        painter.fillRect(52, 202, 296, 16, Qt.white)
+                        # Draw progress
+                        progress_width = int(296 * progress / 100)
+                        painter.fillRect(52, 202, progress_width, 16, Qt.blue)
+                    finally:
+                        painter.end()
+                    
+                    self.splash.setPixmap(pixmap)
+                    self.app.processEvents()
+                    
+            except Exception as e:
+                print(f"Splash update failed: {e}")
+    
+    def load_main_window_step(self, step=0):
+        """Load main window dalam steps untuk show progress"""
+        try:
+            if step == 0:
+                self.update_splash_progress("Loading configuration...", 20)
+                # Delay untuk show progress
+                QTimer.singleShot(200, lambda: self.load_main_window_step(1))
+                
+            elif step == 1:
+                self.update_splash_progress("Loading core modules...", 40)
+                # Import config manager
+                try:
+                    from config.config_manager import ConfigManager
+                    self.config_manager = ConfigManager()
+                except Exception as e:
+                    raise Exception(f"Config loading failed: {e}")
+                
+                QTimer.singleShot(100, lambda: self.load_main_window_step(2))
+                
+            elif step == 2:
+                self.update_splash_progress("Initializing user interface...", 70)
+                QTimer.singleShot(100, lambda: self.load_main_window_step(3))
+                
+            elif step == 3:
+                self.update_splash_progress("Creating main window...", 90)
+                
+                # Import and create main window
+                from ui.explorer_window import ExplorerWindow
+                self.main_window = ExplorerWindow()
+                
+                QTimer.singleShot(100, lambda: self.load_main_window_step(4))
+                
+            elif step == 4:
+                self.update_splash_progress("Finalizing...", 100)
+                QTimer.singleShot(300, self.show_main_window)
+                
+        except Exception as e:
+            self.handle_loading_error(str(e))
+    
+    def show_main_window(self):
+        """Show main window and hide splash"""
+        try:
+            if self.main_window:
+                # Show main window
+                self.main_window.show()
+                self.main_window.raise_()
+                self.main_window.activateWindow()
+                
+                # Hide splash
+                if self.splash:
+                    self.splash.finish(self.main_window)
+                    self.splash = None
+                
+                # Final process events
+                self.app.processEvents()
+                
+        except Exception as e:
+            self.handle_loading_error(f"Failed to show main window: {e}")
+    
+    def handle_loading_error(self, error_message):
+        """Handle loading errors"""
+        # Hide splash
+        if self.splash:
+            self.splash.hide()
+            self.splash = None
+        
+        # Show error
+        try:
+            QMessageBox.critical(
+                None, 
+                "Startup Error", 
+                f"Application failed to start:\n\n{error_message}"
+            )
+        except:
+            print(f"FATAL ERROR: {error_message}")
+        
+        self.app.quit()
     
     def run(self):
-        """Run the application dengan windowed mode fixes"""
+        """Run application dengan splash screen"""
         try:
-            self.logger.info("🚀 Starting application...")
+            # Create and show splash
+            splash_ok = self.create_splash_screen()
             
-            # WINDOWED MODE FIX: Delayed window creation
-            # Ini critical untuk windowed mode di macOS
-            QTimer.singleShot(100, self.create_main_window_delayed)
-            
-            self.logger.info("🎯 Starting event loop...")
+            if splash_ok:
+                # Start loading process dengan delay
+                QTimer.singleShot(500, lambda: self.load_main_window_step(0))
+            else:
+                # Fallback: direct loading tanpa splash
+                self.load_main_window_direct()
             
             # Run event loop
-            result = self.app.exec_()
-            
-            self.logger.info(f"🏁 Application ended with code: {result}")
-            return result
+            return self.app.exec_()
             
         except Exception as e:
-            self.logger.error(f"❌ Fatal application error: {e}")
-            import traceback
-            self.logger.error(traceback.format_exc())
+            print(f"Application failed: {e}")
+            try:
+                QMessageBox.critical(None, "Error", f"Application failed:\n{str(e)}")
+            except:
+                pass
+            return 1
+    
+    def load_main_window_direct(self):
+        """Fallback: direct loading tanpa splash"""
+        try:
+            from ui.explorer_window import ExplorerWindow
+            self.main_window = ExplorerWindow()
+            self.main_window.show()
+        except Exception as e:
+            self.handle_loading_error(str(e))
+
+# Even simpler version - basic splash
+class SimpleWithSplash:
+    """Ultra-simple version dengan basic splash"""
+    
+    def __init__(self):
+        fix_pyinstaller_paths()
+        
+        if sys.platform == 'darwin':
+            os.environ['QT_MAC_WANTS_LAYER'] = '1'
+            
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        self.app = QApplication(sys.argv)
+        self.app.setApplicationName("FaceSync Finder")
+        
+    def run(self):
+        try:
+            # Simple splash with background image
+            splash_pixmap = None
+            
+            # Try to load splash background image
+            splash_bg_path = os.path.join(os.path.dirname(__file__), "assets", "ownize.png")
+            if os.path.exists(splash_bg_path):
+                splash_pixmap = QPixmap(splash_bg_path)
+                if splash_pixmap.isNull():
+                    splash_pixmap = None
+                else:
+                    # Scale if too large
+                    if splash_pixmap.width() > 400 or splash_pixmap.height() > 300:
+                        splash_pixmap = splash_pixmap.scaled(400, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # Fallback to simple text splash
+            if splash_pixmap is None:
+                splash_pixmap = QPixmap(300, 150)
+                splash_pixmap.fill(Qt.white)
+                
+                painter = QPainter(splash_pixmap)
+                painter.setFont(QFont("Arial", 16, QFont.Bold))
+                painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, 
+                               "FaceSync Finder\n\nLoading...")
+                painter.end()
+            
+            # Create and show splash
+            splash = QSplashScreen(splash_pixmap)
+            splash.show()
+            self.app.processEvents()
+            
+            # Load main window
+            splash.showMessage("Loading...", Qt.AlignBottom | Qt.AlignCenter)
+            self.app.processEvents()
+            
+            from ui.explorer_window import ExplorerWindow
+            main_window = ExplorerWindow()
+            
+            # Show window and hide splash
+            main_window.show()
+            splash.finish(main_window)
+            
+            return self.app.exec_()
+            
+        except Exception as e:
+            try:
+                QMessageBox.critical(None, "Error", f"Failed: {str(e)}")
+            except:
+                print(f"FATAL: {e}")
             return 1
 
-
-# def test_image_orientation(url):
-#     """Test function untuk check EXIF orientation"""
-#     try:
-#         print(f"🧪 Testing URL orientation...")
-#         print(f"🌐 URL: {url[:100]}...")
-        
-#         # Download image
-#         response = requests.get(url, timeout=15)
-#         if response.status_code != 200:
-#             print(f"❌ Download failed: {response.status_code}")
-#             return
-            
-#         print(f"✅ Downloaded {len(response.content)} bytes")
-        
-#         # Open with Pillow
-#         pil_image = Image.open(BytesIO(response.content))
-#         print(f"🖼️ Image size: {pil_image.size}")
-#         print(f"🖼️ Image mode: {pil_image.mode}")
-        
-#         # Check EXIF data with multiple methods
-#         exif_dict = None
-#         orientation = None
-        
-#         # Method 1: Try _getexif() (older method)
-#         try:
-#             exif_dict = pil_image._getexif()
-#             if exif_dict:
-#                 orientation = exif_dict.get(ORIENTATION) or exif_dict.get(274)
-#                 print(f"📋 EXIF data found via _getexif(): {len(exif_dict)} entries")
-#         except AttributeError:
-#             print("⚠️ _getexif() not available")
-        
-#         # Method 2: Try getexif() (newer method) if first failed
-#         if not orientation:
-#             try:
-#                 exif_dict = pil_image.getexif()
-#                 if exif_dict:
-#                     orientation = exif_dict.get(ORIENTATION) or exif_dict.get(274)
-#                     print(f"📋 EXIF data found via getexif(): {len(exif_dict)} entries")
-#             except AttributeError:
-#                 print("⚠️ getexif() not available")
-        
-#         print(f"🧭 EXIF orientation: {orientation}")
-            
-#         if orientation:
-#             orientation_meanings = {
-#                 1: "Normal (no rotation needed)",
-#                 2: "Horizontal flip", 
-#                 3: "180° rotation needed",
-#                 4: "Vertical flip",
-#                 5: "Horizontal flip + 270° rotation",
-#                 6: "270° rotation needed (90° CW)",
-#                 7: "Horizontal flip + 90° rotation", 
-#                 8: "90° rotation needed (270° CW)"
-#             }
-#             meaning = orientation_meanings.get(orientation, "Unknown orientation")
-#             print(f"📖 Meaning: {meaning}")
-            
-#             # Check if this image needs rotation
-#             needs_rotation = orientation in [3, 6, 8]
-#             if needs_rotation:
-#                 print(f"🔄 ⚠️ THIS IMAGE NEEDS ROTATION!")
-#                 print(f"   Original size: {pil_image.size}")
-                
-#                 # Apply the rotation
-#                 if orientation == 3:
-#                     rotated = pil_image.rotate(180, expand=True)
-#                     print(f"   Applied 180° → New size: {rotated.size}")
-#                 elif orientation == 6:
-#                     rotated = pil_image.rotate(270, expand=True)
-#                     print(f"   Applied 270° → New size: {rotated.size}")
-#                 elif orientation == 8:
-#                     rotated = pil_image.rotate(90, expand=True)
-#                     print(f"   Applied 90° → New size: {rotated.size}")
-#                 else:
-#                     print(f"✅ No rotation needed")
-#             else:
-#                 print("✅ No orientation tag found - image should display normally")
-#         else:
-#             print("✅ No EXIF data found - image should display normally")
-        
-#         return pil_image
-        
-#     except Exception as e:
-#         print(f"❌ Test error: {e}")
-#         import traceback
-#         traceback.print_exc()
-#         return None
-    
-
 if __name__ == '__main__':
-    app = MainApplication()
-    sys.exit(app.run())
-    # test_url = "https://s3.ap-southeast-1.wasabisys.com/rca-photos/originals/c10ee611-f5b8-4ab1-b575-aec0fa491466.jpg" 
+    # Pilih version yang mau dipakai
+    USE_SIMPLE_SPLASH = True  # Set False untuk detailed progress splash
     
-    # print("🧪 STARTING ORIENTATION TEST")
-    # print("=" * 50)
-    
-    # result = test_image_orientation(test_url)
-    
-    # print("=" * 50)
-    # print("🏁 TEST COMPLETED")
+    try:
+        if USE_SIMPLE_SPLASH:
+            app = SimpleWithSplash()
+        else:
+            app = FastMainApplication()
+        
+        sys.exit(app.run())
+        
+    except Exception as e:
+        print(f"FATAL: {e}")
+        sys.exit(1)

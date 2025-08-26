@@ -1,3 +1,5 @@
+# ui/face_search_dialog.py
+
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QWidget, QProgressBar, QListWidget, QSlider, QCheckBox,
