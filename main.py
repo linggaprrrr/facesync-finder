@@ -68,7 +68,6 @@ class FastMainApplication:
             icon_path = os.path.join(os.path.dirname(__file__), "assets", "ownize_logo.ico")
             if os.path.exists(icon_path):
                 self.app.setWindowIcon(QIcon(icon_path))
-                print(f"Icon load: {icon_path}")
                 return True
             else:
                 print(f"Icon not found: {icon_path}")
@@ -299,13 +298,95 @@ class FastMainApplication:
         except Exception as e:
             self.handle_loading_error(str(e))
 
+# Even simpler version - basic splash
+class SimpleWithSplash:
+    """Ultra-simple version dengan basic splash"""
+    
+    def __init__(self):
+        fix_pyinstaller_paths()
+        
+        if sys.platform == 'darwin':
+            os.environ['QT_MAC_WANTS_LAYER'] = '1'
+            
+        QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+        self.app = QApplication(sys.argv)
+        self.app.setApplicationName("FaceSync Finder")
+        self.set_app_icon()
+    
+    def set_app_icon(self):
+        """Set application icon from assets"""
+        try:
+            icon_path = os.path.join(os.path.dirname(__file__), "assets", "ownize_logo.ico")
+            if os.path.exists(icon_path):
+                self.app.setWindowIcon(QIcon(icon_path))
+                return True
+            else:
+                print(f"Icon not found: {icon_path}")
+                return False
+        except Exception as e:
+            print(f"Failed to set icon: {e}")
+            return False
+    def run(self):
+        try:
+            # Simple splash with background image
+            splash_pixmap = None
+            
+            # Try to load splash background image
+            splash_bg_path = os.path.join(os.path.dirname(__file__), "assets", "ownize.png")
+            if os.path.exists(splash_bg_path):
+                splash_pixmap = QPixmap(splash_bg_path)
+                if splash_pixmap.isNull():
+                    splash_pixmap = None
+                else:
+                    # Scale if too large
+                    if splash_pixmap.width() > 400 or splash_pixmap.height() > 300:
+                        splash_pixmap = splash_pixmap.scaled(400, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # Fallback to simple text splash
+            if splash_pixmap is None:
+                splash_pixmap = QPixmap(300, 150)
+                splash_pixmap.fill(Qt.white)
+                
+                painter = QPainter(splash_pixmap)
+                painter.setFont(QFont("Arial", 16, QFont.Bold))
+                painter.drawText(splash_pixmap.rect(), Qt.AlignCenter, 
+                               "FaceSync Finder\n\nLoading...")
+                painter.end()
+            
+            # Create and show splash
+            splash = QSplashScreen(splash_pixmap)
+            splash.show()
+            self.app.processEvents()
+            
+            # Load main window
+            splash.showMessage("Loading...", Qt.AlignBottom | Qt.AlignCenter)
+            self.app.processEvents()
+            
+            from ui.explorer_window import ExplorerWindow
+            main_window = ExplorerWindow()
+            
+            # Show window and hide splash
+            main_window.show()
+            splash.finish(main_window)
+            
+            return self.app.exec_()
+            
+        except Exception as e:
+            try:
+                QMessageBox.critical(None, "Error", f"Failed: {str(e)}")
+            except:
+                print(f"FATAL: {e}")
+            return 1
 
 if __name__ == '__main__':
     # Pilih version yang mau dipakai
     USE_SIMPLE_SPLASH = True  # Set False untuk detailed progress splash
     
     try:
-        app = FastMainApplication()
+        if USE_SIMPLE_SPLASH:
+            app = SimpleWithSplash()
+        else:
+            app = FastMainApplication()
         
         sys.exit(app.run())
         
