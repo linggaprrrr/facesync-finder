@@ -408,6 +408,9 @@ class ExplorerWindow(QMainWindow):
         # Start background model loading setelah UI siap
         QTimer.singleShot(3000, self.start_background_model_loading)
 
+        # init window search btn
+        self.FaceSearchDialogClass = FaceSearchDialog
+
 
     def _init_ui(self):
         """Initialize UI components - TIDAK BERUBAH"""
@@ -621,22 +624,30 @@ class ExplorerWindow(QMainWindow):
             self.show_model_loading_dialog()
             return
         
-        try:
-            # Import dialog (lightweight since models already loaded)
-            from ui.face_search_dialog import FaceSearchDialog
-            
+        try:            
+            # Disable button ketika dialog aktif
+            self.face_search_btn.setText("Loading camera...")
+            self.face_search_btn.setEnabled(False)
+            self.face_search_btn.setText("👤 Face Search is Opened")
+
             # Create dialog with pre-loaded models - FAST!
-            search_dialog = FaceSearchDialog(
+            search_dialog = self.FaceSearchDialogClass(
                 face_detector=self._face_detector,
                 resnet=self._face_encoder,
                 device=self._device,
                 api_base=self._api_base,
                 parent=self
             )
+
+            
             
             # Connect signals
             search_dialog.search_completed.connect(self.handle_face_search_results)
-            
+            self.face_search_btn.setText("👤 Face By Search")
+             # Enable button lagi kalau dialog sudah ditutup
+            search_dialog.finished.connect(lambda: self.face_search_btn.setEnabled(True))
+
+
             # Show dialog - should be fast now
             search_dialog.show()
             
@@ -674,96 +685,6 @@ class ExplorerWindow(QMainWindow):
         
         self.log_with_timestamp("⚠️ Model loading cancelled by user")
     
-    # def open_face_search(self):
-    #     """Open face search dialog with comprehensive error handling"""
-    #     self.file_list.clear()
-    #     try:            
-    #         # self.log_with_timestamp("🔄 Starting face search...")
-            
-    #         # Debug: Check if running in PyInstaller
-    #         import sys
-    #         if getattr(sys, 'frozen', False):
-    #             self.log_with_timestamp("📦 Running in PyInstaller mode")
-    #             bundle_dir = sys._MEIPASS
-    #             self.log_with_timestamp(f"📁 Bundle directory: {bundle_dir}")
-            
-            
-    #         # Step 1: Import dengan error handling
-    #         # self.log_with_timestamp("📦 Importing face detector...")
-    #         try:
-    #             from utils.image_processing import get_shared_detector
-    #             face_detector = get_shared_detector()
-    #             # self.log_with_timestamp("✅ Face detector imported successfully")
-    #         except Exception as e:
-    #             self.log_with_timestamp(f"❌ Face detector import failed: {str(e)}")
-    #             self.show_error("Face detector import failed", str(e))
-    #             return
-            
-    #         # Step 2: Import FaceEncoder
-    #         # self.log_with_timestamp("📦 Importing face encoder...")
-    #         try:
-    #             from core.device_setup import FaceEncoder
-    #             resnet = FaceEncoder()
-    #             device = FaceEncoder.get_device()
-    #             api_base = FaceEncoder.get_api_base()
-    #             # self.log_with_timestamp("✅ Face encoder loaded successfully")
-    #         except Exception as e:
-    #             self.log_with_timestamp(f"❌ Face encoder import failed: {str(e)}")
-    #             self.show_error("Face encoder import failed", str(e))
-    #             return
-            
-    #         # Step 3: Import dialog
-    #         # self.log_with_timestamp("📦 Importing face search dialog...")
-    #         try:
-    #             from ui.face_search_dialog import FaceSearchDialog
-    #             # self.log_with_timestamp("✅ Dialog imported successfully")
-    #         except Exception as e:
-    #             self.log_with_timestamp(f"❌ Dialog import failed: {str(e)}")
-    #             self.show_error("Dialog import failed", str(e))
-    #             return
-            
-    #         # Step 4: Create dialog
-    #         # self.log_with_timestamp("🔧 Creating face search dialog...")
-    #         try:
-    #             search_dialog = FaceSearchDialog(
-    #                 face_detector=face_detector,
-    #                 resnet=resnet,
-    #                 device=device,
-    #                 api_base=api_base,
-    #                 parent=self
-    #             )
-    #             # self.log_with_timestamp("✅ Dialog created successfully")
-    #         except Exception as e:
-    #             self.log_with_timestamp(f"❌ Dialog creation failed: {str(e)}")
-    #             self.show_error("Dialog creation failed", str(e))
-    #             return
-            
-    #         # Step 5: Connect signals
-    #         try:
-    #             search_dialog.search_completed.connect(self.handle_face_search_results)
-    #             # self.log_with_timestamp("✅ Signals connected")
-    #         except Exception as e:
-    #             self.log_with_timestamp(f"❌ Signal connection failed: {str(e)}")
-    #             self.show_error("Signal connection failed", str(e))
-    #             return
-            
-    #         # Step 6: Show dialog
-    #         # self.log_with_timestamp("🎯 Showing face search dialog...")
-    #         try:
-    #             search_dialog.show()
-    #             # self.log_with_timestamp("✅ Face search dialog shown successfully")
-    #         except Exception as e:
-    #             self.log_with_timestamp(f"❌ Dialog show failed: {str(e)}")
-    #             self.show_error("Dialog show failed", str(e))
-    #             return
-
-    #     except Exception as e:
-    #         self.log_with_timestamp(f"❌ Unexpected error in open_face_search: {str(e)}")
-    #         self.show_error("Unexpected error", str(e))
-            
-    #         # Print full traceback untuk debugging
-    #         import traceback
-    #         traceback.print_exc()
 
     def show_error(self, title, message):
         """Show error dialog dengan fallback"""

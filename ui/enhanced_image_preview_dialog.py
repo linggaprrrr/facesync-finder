@@ -459,6 +459,7 @@ class EnhancedImagePreviewDialog(QDialog):
             
     def closeEvent(self, event):
         """Clean up when closing"""
+        # self.is_closing = True
         # Cancel download thread
         if self.download_thread and self.download_thread.isRunning():
             self.download_thread.terminate()
