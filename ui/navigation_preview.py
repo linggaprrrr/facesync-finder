@@ -721,7 +721,7 @@ class NavigationPreviewDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Download Error", f"Failed: {str(e)}")
     
-    def closeEvent(self, event, cls):
+    def closeEvent(self, event):
         """OPTIMIZED cleanup"""
         print("CLEANUP: Dialog closing with optimized cleanup")
         
@@ -729,8 +729,7 @@ class NavigationPreviewDialog(QDialog):
         NavigationPreviewDialog.set_global_close_state()
         
         self.is_closing = True
-        cls._global_close_requested = True
-        
+        self.__class__._global_close_requested = True
         
         # ===== CPU FIX: Quick cleanup =====
         self.cancel_all_operations()
